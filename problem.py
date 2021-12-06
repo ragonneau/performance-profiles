@@ -1,9 +1,9 @@
-import os
 import re
 from subprocess import DEVNULL, PIPE, Popen
 
 import numpy as np
 import pycutest
+from scipy.optimize import linprog
 
 
 class CUTEstProblems(list):
@@ -70,6 +70,7 @@ class CUTEstProblem:
 
     def __init__(self, problem_name, *args, **kwargs):
         self._p = pycutest.import_problem(problem_name, *args, **kwargs)
+        self._project_initial_guess()
 
     def __getattr__(self, item):
         try:
@@ -262,3 +263,9 @@ class CUTEstProblem:
         violmx = np.max(cub, initial=0.0)
         violmx = max(violmx, np.max(np.abs(ceq), initial=0.0))
         return violmx
+
+    def _project_initial_guess(self):
+        c = np.zeros(self.n)
+        bounds = list(zip(self.xl, self.xu))
+        res = linprog(c, self.aub, self.bub, self.aeq, self.beq, bounds)
+        self.x0 = res.x

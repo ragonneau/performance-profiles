@@ -6,12 +6,13 @@ import cobyqa
 import numpy as np
 import pdfo
 from matplotlib import pyplot as plt
+from matplotlib.backends import backend_pdf
 from matplotlib.ticker import MultipleLocator
+
+from problem import CUTEstProblems
 
 BASE_DIR = Path(__file__).resolve(strict=True).parent
 ARCH_DIR = Path(BASE_DIR, os.environ.get('PYCUTEST_CACHE'))
-ARCH_DIR.mkdir(exist_ok=True)
-from problem import CUTEstProblems  # noqa
 
 
 class Profiles:
@@ -56,14 +57,14 @@ class Profiles:
         filename = f'hist-{solver.lower()}-{self.constraints}.nc'
         return Path(self.eval_dir, filename)
 
-    def get_perf_path(self, solvers, prec):
+    def get_perf_path(self, solvers):
         solvers = '_'.join(map(str.lower, solvers))
-        filename = f'perf-{solvers}-{self.constraints}-{prec}.pdf'
+        filename = f'perf-{solvers}-{self.constraints}.pdf'
         return Path(self.perf_dir, filename)
 
-    def get_data_path(self, solvers, prec):
+    def get_data_path(self, solvers):
         solvers = '_'.join(map(str.lower, solvers))
-        filename = f'data-{solvers}-{self.constraints}-{prec}.pdf'
+        filename = f'data-{solvers}-{self.constraints}.pdf'
         return Path(self.data_dir, filename)
 
     def profiles(self, solvers, options=None, load=True):
@@ -79,6 +80,8 @@ class Profiles:
 
         merits_min = np.min(merits, axis=(1, 2))
         f0 = merits[..., 0]
+        pdf_perf = backend_pdf.PdfPages(self.get_perf_path(solvers))
+        pdf_data = backend_pdf.PdfPages(self.get_data_path(solvers))
         for prec in range(1, 10):
             print(f'Creating plots with tau = 1e-{prec}.')
             tau = 10 ** (-prec)
@@ -122,9 +125,9 @@ class Profiles:
             plt.xlim(0, 1.1 * max(0.01, ratio_max))
             plt.ylim(0, 1.1)
             plt.xlabel(r'$\log_2(\mathrm{NF}/\mathrm{NF}_{\min})$')
-            plt.ylabel(f'Performance profile ($\\tau=10^{{-{prec}}}$)')
+            plt.ylabel(fr'Performance profile ($\tau=10^{{-{prec}}}$)')
             plt.legend(loc='lower right')
-            plt.savefig(self.get_perf_path(solvers, prec), bbox_inches='tight')
+            pdf_perf.savefig(fig, bbox_inches='tight')
             plt.close()
 
             fig = plt.figure(dpi=dpi)
@@ -141,10 +144,12 @@ class Profiles:
             plt.xlim(0, 1.1 * max(0.01, ratio_max))
             plt.ylim(0, 1.1)
             plt.xlabel(r'$\mathrm{NF}/(n+1)$')
-            plt.ylabel(f'Data profile ($\\tau=10^{{-{prec}}}$)')
+            plt.ylabel(fr'Data profile ($\tau=10^{{-{prec}}}$)')
             plt.legend(loc='lower right')
-            plt.savefig(self.get_data_path(solvers, prec), bbox_inches='tight')
+            pdf_data.savefig(fig, bbox_inches='tight')
             plt.close()
+        pdf_perf.close()
+        pdf_data.close()
 
     def run_solvers(self, solvers, options=None, load=True):
         options = self.set_default_options(options)
@@ -192,7 +197,7 @@ class Profiles:
         merits = []
         if solver.lower() == 'cobyqa':
             options_ = dict(options)
-            options_['debug'] = False  # FIXME
+            options_['debug'] = True
             res = cobyqa.minimize(lambda x: self.eval(x, problem, merits),
                                   problem.x0, xl=problem.xl, xu=problem.xu,
                                   Aub=problem.aub, bub=problem.bub,
@@ -202,6 +207,7 @@ class Profiles:
             res.merits = merits
         elif solver.lower() in pdfo.__all__:
             options_ = dict(options)
+            options_['eliminate_lin_eq'] = False
             bounds = pdfo.Bounds(problem.xl, problem.xu)
             kwargs = {
                 'fun': self.eval,
