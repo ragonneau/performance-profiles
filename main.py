@@ -32,5 +32,5 @@ def validate(problem):
 
 
 if __name__ == '__main__':
-    p = Profiles(10, constraints='U', callback=validate)
-    p(solvers=['NEWUOA', 'COBYQA'])
+    p = Profiles(10, constraints='Q', callback=validate)
+    p(solvers=['COBYLA', 'COBYQA'], load=False)

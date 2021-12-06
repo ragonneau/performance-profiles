@@ -1,4 +1,5 @@
 import re
+import warnings
 from subprocess import DEVNULL, PIPE, Popen
 
 import numpy as np
@@ -267,5 +268,7 @@ class CUTEstProblem:
     def _project_initial_guess(self):
         c = np.zeros(self.n)
         bounds = list(zip(self.xl, self.xu))
-        res = linprog(c, self.aub, self.bub, self.aeq, self.beq, bounds)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            res = linprog(c, self.aub, self.bub, self.aeq, self.beq, bounds)
         self.x0 = res.x

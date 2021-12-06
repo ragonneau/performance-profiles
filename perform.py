@@ -24,7 +24,7 @@ class Profiles:
 
         self.perf_dir = Path(ARCH_DIR, 'performance', str(self.n))
         self.data_dir = Path(ARCH_DIR, 'data', str(self.n))
-        self.eval_dir = Path(ARCH_DIR, 'save', str(self.n))
+        self.eval_dir = Path(ARCH_DIR, 'tables', str(self.n))
 
         self.problems = CUTEstProblems(self.n, self.constraints, callback)
         print()
@@ -53,8 +53,8 @@ class Profiles:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.eval_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_rec_path(self, solver):
-        filename = f'hist-{solver.lower()}-{self.constraints}.nc'
+    def get_rec_path(self, problem, solver):
+        filename = f'hist-{problem.lower()}-{solver.lower()}.npy'
         return Path(self.eval_dir, filename)
 
     def get_perf_path(self, solvers):
@@ -82,6 +82,7 @@ class Profiles:
         f0 = merits[..., 0]
         pdf_perf = backend_pdf.PdfPages(self.get_perf_path(solvers))
         pdf_data = backend_pdf.PdfPages(self.get_data_path(solvers))
+        print()
         for prec in range(1, 10):
             print(f'Creating plots with tau = 1e-{prec}.')
             tau = 10 ** (-prec)
@@ -155,22 +156,14 @@ class Profiles:
         options = self.set_default_options(options)
         maxfev = options.get('maxfev')
         merits = np.empty((len(self.problems), len(solvers), maxfev))
-        loaded = {}
-        if load:
-            pass
-            # for solver in solvers:
-            #     record_path = self.get_rec_path(solver)
-            #     # TODO: Inclusions among the constraints are possible
-            #     if record_path.is_file():
-            #         loaded[solver] = xr.open_dataarray(record_path)
         n_problems = len(self.problems)
         for i, problem in enumerate(self.problems):
             print(f'Solving {problem.name} ({i + 1}/{n_problems})...')
             for j, solver in enumerate(solvers):
                 print(f'{solver:>10}:', end=' ')
-                if loaded.get(solver) is not None and problem.name in []:
-                    # history = loaded.get(solver).loc[problem.name]
-                    history = None
+                rec_path = self.get_rec_path(problem.name, solver)
+                if load and rec_path.is_file():
+                    history = np.load(rec_path)  # noqa
                     print('Loaded.')
                 else:
                     with warnings.catch_warnings():
@@ -185,12 +178,9 @@ class Profiles:
                     history = np.empty(maxfev, dtype=float)
                     history[:nfev] = res.merits[:nfev]
                     history[nfev:] = res.merits[nfev - 1]
+                    rec_path = self.get_rec_path(problem.name, solver)
+                    np.save(rec_path, history)  # noqa
                 merits[i, j, :] = history
-        # for solver in da.coords['solver'].values:
-        #     temp = da.loc[:, solver, :]
-        #     if loaded.get(solver) is not None:
-        #         temp = temp.combine_first(loaded.get(solver))
-        #     temp.to_netcdf(self.get_rec_path(solver))
         return merits
 
     def minimize(self, problem, solver, options):
