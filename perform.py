@@ -24,7 +24,7 @@ class Profiles:
 
         self.perf_dir = Path(ARCH_DIR, 'performance', str(self.n))
         self.data_dir = Path(ARCH_DIR, 'data', str(self.n))
-        self.eval_dir = Path(ARCH_DIR, 'tables', str(self.n))
+        self.eval_dir = Path(ARCH_DIR, 'tables')
 
         self.problems = CUTEstProblems(self.n, self.constraints, callback)
         print()
@@ -54,7 +54,11 @@ class Profiles:
         self.eval_dir.mkdir(parents=True, exist_ok=True)
 
     def get_rec_path(self, problem, solver):
-        filename = f'hist-{problem.lower()}-{solver.lower()}.npy'
+        if problem.sifParams is None:
+            filename = f'hist-{problem.name}-{solver.lower()}.npy'
+        else:
+            sif = '_'.join(f'{k}{v}' for k, v in problem.sifParams.items())
+            filename = f'hist-{problem.name}_{sif}-{solver.lower()}.npy'
         return Path(self.eval_dir, filename)
 
     def get_perf_path(self, solvers):
@@ -161,10 +165,15 @@ class Profiles:
             print(f'Solving {problem.name} ({i + 1}/{n_problems})...')
             for j, solver in enumerate(solvers):
                 print(f'{solver:>10}:', end=' ')
-                rec_path = self.get_rec_path(problem.name, solver)
+                rec_path = self.get_rec_path(problem, solver)
                 if load and rec_path.is_file():
                     history = np.load(rec_path)  # noqa
-                    print('Loaded.')
+                    nfev = np.argmax(np.isnan(history))
+                    if nfev == 0:
+                        nfev = maxfev
+                    merit = np.min(history[:nfev])
+                    print(f'merit = {merit:.4e},', end=' ')
+                    print(f'nfev = {nfev} (loaded).')
                 else:
                     with warnings.catch_warnings():
                         warnings.simplefilter('ignore')
@@ -175,11 +184,11 @@ class Profiles:
                     print(f'nfev = {res.nfev}.')
 
                     nfev = min(res.nfev, maxfev)
-                    history = np.empty(maxfev, dtype=float)
+                    history = np.full(maxfev, np.nan)
                     history[:nfev] = res.merits[:nfev]
-                    history[nfev:] = res.merits[nfev - 1]
-                    rec_path = self.get_rec_path(problem.name, solver)
+                    rec_path = self.get_rec_path(problem, solver)
                     np.save(rec_path, history)  # noqa
+                history[nfev:] = history[nfev - 1]
                 merits[i, j, :] = history
         return merits
 
