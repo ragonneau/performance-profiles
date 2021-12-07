@@ -43,10 +43,6 @@ class CUTEstProblems(list):
         valid = isinstance(problem, CUTEstProblem)
         valid = valid and np.all(problem.vartype == 0)
         valid = valid and problem.n <= self._n
-        if problem.type == 'O':
-            valid = valid and properties['constraints'] in 'QO'
-        else:
-            valid = valid and problem.type == properties['constraints']
         if callback is not None:
             valid = valid and callback(problem)
         return valid
