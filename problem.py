@@ -227,10 +227,12 @@ class CUTEstProblem:
         return np.reshape(gx, (-1, self.n))
 
     def maxcv(self, x):
-        cub = np.r_[np.dot(self.aub, x) - self.bub, self.cub(x)]
-        ceq = np.r_[np.dot(self.aeq, x) - self.beq, self.ceq(x)]
-        violmx = np.max(cub, initial=0.0)
-        violmx = max(violmx, np.max(np.abs(ceq), initial=0.0))
+        violmx = np.max(self.xl - x, initial=0.0)
+        violmx = np.max(x - self.xu, initial=violmx)
+        violmx = np.max(np.dot(self.aub, x) - self.bub, initial=violmx)
+        violmx = np.max(np.abs(np.dot(self.aeq, x) - self.beq), initial=violmx)
+        violmx = np.max(self.cub(x), initial=violmx)
+        violmx = np.max(np.abs(self.ceq(x)), initial=violmx)
         return violmx
 
     def _linear_ub(self):

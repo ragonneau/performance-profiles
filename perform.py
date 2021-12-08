@@ -35,7 +35,7 @@ class Profiles:
         plt.rc('font', family='serif')
 
     def __call__(self, solvers, options=None, load=True):
-        solvers = sorted(map(str.lower, solvers))
+        solvers = list(map(str.lower, solvers))
         options = self.set_default_options(options)
 
         self.create_arborescence()
@@ -55,19 +55,20 @@ class Profiles:
 
     def get_rec_path(self, problem, solver):
         if problem.sifParams is None:
-            filename = f'hist-{problem.name}-{solver.lower()}.npy'
+            cache = Path(self.eval_dir, problem.name)
         else:
             sif = '_'.join(f'{k}{v}' for k, v in problem.sifParams.items())
-            filename = f'hist-{problem.name}_{sif}-{solver.lower()}.npy'
-        return Path(self.eval_dir, filename)
+            cache = Path(self.eval_dir, f'{problem.name}_{sif}')
+        cache.mkdir(exist_ok=True)
+        return Path(cache, f'hist-{solver.lower()}.npy')
 
     def get_perf_path(self, solvers):
-        solvers = '_'.join(map(str.lower, solvers))
+        solvers = '_'.join(sorted(map(str.lower, solvers)))
         filename = f'perf-{solvers}-{self.constraints}.pdf'
         return Path(self.perf_dir, filename)
 
     def get_data_path(self, solvers):
-        solvers = '_'.join(map(str.lower, solvers))
+        solvers = '_'.join(sorted(map(str.lower, solvers)))
         filename = f'data-{solvers}-{self.constraints}.pdf'
         return Path(self.data_dir, filename)
 
@@ -189,7 +190,6 @@ class Profiles:
                     nfev = min(res.nfev, maxfev)
                     history = np.full(maxfev, np.nan)
                     history[:nfev] = res.merits[:nfev]
-                    rec_path = self.get_rec_path(problem, solver)
                     np.save(rec_path, history)  # noqa
                 history[nfev:] = history[nfev - 1]
                 merits[i, j, :] = history
@@ -250,8 +250,9 @@ class Profiles:
     def eval(x, problem, merits):
         fx = problem.fun(x)
         maxcv = problem.maxcv(x)
+        nan = np.finfo(type(fx)).max
         if maxcv >= 1e-2:
-            merits.append(np.finfo(type(fx)).max)
+            merits.append(nan)
         else:
-            merits.append(fx + 1e3 * maxcv)
+            merits.append(np.nan_to_num(fx + 1e6 * maxcv, nan=nan))
         return fx

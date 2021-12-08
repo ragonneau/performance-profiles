@@ -28,11 +28,11 @@ from perform import Profiles  # noqa
 def validate(problem):
     valid = problem.m <= 50
     valid = valid and problem.name not in ['CSFI1', 'CSFI2', 'POLAK6']
-    # TODO: Study and remove the following
+    # TODO: Why does it cycle (CPQP)?
     valid = valid and problem.name not in ['HS84']
     return valid
 
 
 if __name__ == '__main__':
-    p = Profiles(10, constraints='U', callback=validate)
-    p(solvers=['cobyqa', 'newuoa'])
+    p = Profiles(10, constraints='L', callback=validate)
+    p(solvers=['cobyqa', 'lincoa'])
