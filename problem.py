@@ -14,8 +14,8 @@ class CUTEstProblems(list):
         self._n = n
         names = pycutest.find_problems('CLQSO', constraints, n=[1, self._n])
         for i, name in enumerate(sorted(names)):
-            print(f'Loading {name} ({i + 1}/{len(names)})...', end=' ')
             try:
+                print(f'Loading {name} ({i + 1}/{len(names)})...', end=' ')
                 if pycutest.problem_properties(name)['n'] is None:
                     sif = self._sif_decode(name)
                     if sif.size > 0 and sif[0] <= self._n:
@@ -27,8 +27,7 @@ class CUTEstProblems(list):
                 else:
                     problem = CUTEstProblem(name)
                     self.append(problem, callback)
-            except (AttributeError, ModuleNotFoundError, RuntimeError,
-                    FileNotFoundError):
+            except (AttributeError, ModuleNotFoundError, RuntimeError):
                 print('Internal errors occurred.')
 
     def append(self, problem, callback=None):
@@ -39,7 +38,7 @@ class CUTEstProblems(list):
             print('Validation failed.')
 
     def _validate(self, problem, callback=None):
-        properties = pycutest.problem_properties(problem.name)
+        # properties = pycutest.problem_properties(problem.name)
         valid = isinstance(problem, CUTEstProblem)
         valid = valid and np.all(problem.vartype == 0)
         valid = valid and problem.n <= self._n
@@ -67,6 +66,12 @@ class CUTEstProblem:
 
     def __init__(self, problem_name, *args, **kwargs):
         self._p = pycutest.import_problem(problem_name, *args, **kwargs)
+        self._xl = None
+        self._xu = None
+        self._aub = None
+        self._bub = None
+        self._aeq = None
+        self._beq = None
         self._project_initial_guess()
 
     def __getattr__(self, item):
@@ -80,69 +85,47 @@ class CUTEstProblem:
 
     @property
     def xl(self):
-        xl = self.bl
-        xl[xl <= -1e20] = -np.inf
-        return xl
+        if self._xl is not None:
+            return self._xl
+        self._xl = self.bl
+        self._xl[self._xl <= -1e20] = -np.inf
+        return self._xl
 
     @property
     def xu(self):
-        xu = self.bu
-        xu[xu >= 1e20] = np.inf
-        return xu
+        if self._xu is not None:
+            return self._xu
+        self._xu = self.bu
+        self._xu[self._xu >= 1e20] = np.inf
+        return self._xu
 
     @property
     def aub(self):
-        if self.m == 0:
-            return np.empty((0, self.n))
-        indices = self.is_linear_cons & np.logical_not(self.is_eq_cons)
-        indices_lower = self.cl[indices] > -1e20
-        indices_upper = self.cu[indices] < 1e20
-        aub = []
-        for i, index in enumerate(np.flatnonzero(indices)):
-            _, g_index = self.cons(np.zeros(self.n), index, True)
-            if indices_lower[i]:
-                aub.append(-g_index)
-            if indices_upper[i]:
-                aub.append(g_index)
-        return np.reshape(aub, (-1, self.n))
+        if self._aub is not None:
+            return self._aub
+        self._aub, self._bub = self._linear_ub()
+        return self._aub
 
     @property
     def bub(self):
-        if self.m == 0:
-            return np.empty(0)
-        indices = self.is_linear_cons & np.logical_not(self.is_eq_cons)
-        indices_lower = self.cl[indices] > -1e20
-        indices_upper = self.cu[indices] < 1e20
-        bub = []
-        for i, index in enumerate(np.flatnonzero(indices)):
-            c_index = self.cons(np.zeros(self.n), index)
-            if indices_lower[i]:
-                bub.append(c_index - self.cl[index])
-            if indices_upper[i]:
-                bub.append(self.cu[index] - c_index)
-        return np.array(bub)
+        if self._bub is not None:
+            return self._bub
+        self._aub, self._bub = self._linear_ub()
+        return self._bub
 
     @property
     def aeq(self):
-        if self.m == 0:
-            return np.empty((0, self.n))
-        indices = self.is_linear_cons & self.is_eq_cons
-        aeq = []
-        for index in np.flatnonzero(indices):
-            _, g_index = self.cons(np.zeros(self.n), index, True)
-            aeq.append(g_index)
-        return np.reshape(aeq, (-1, self.n))
+        if self._aeq is not None:
+            return self._aeq
+        self._aeq, self._beq = self._linear_eq()
+        return self._aeq
 
     @property
     def beq(self):
-        if self.m == 0:
-            return np.empty(0)
-        indices = self.is_linear_cons & self.is_eq_cons
-        beq = []
-        for index in np.flatnonzero(indices):
-            c_index = self.cons(np.zeros(self.n), index)
-            beq.append(0.5 * (self.cl[index] + self.cu[index]) - c_index)
-        return np.array(beq)
+        if self._beq is not None:
+            return self._beq
+        self._aeq, self._beq = self._linear_eq()
+        return self._beq
 
     @property
     def mlub(self):
@@ -178,19 +161,8 @@ class CUTEstProblem:
 
     @property
     def type(self):
-        tol = 10.0 * np.finfo(float).eps * self.n
-        if self.m == 0:
-            if np.all(self.xl == -np.inf) and np.all(self.xu == np.inf):
-                return 'U'
-            elif np.all(self.xu - self.xl <= tol * np.abs(self.xu)):
-                return 'X'
-            else:
-                return 'B'
-        else:
-            if np.all(self.is_linear_cons):
-                return 'L'
-            else:
-                return 'O'
+        properties = pycutest.problem_properties(self.name)
+        return properties.get('constraints')
 
     def fun(self, x, gradient=False):
         x = np.asarray(x)
@@ -260,6 +232,36 @@ class CUTEstProblem:
         violmx = np.max(cub, initial=0.0)
         violmx = max(violmx, np.max(np.abs(ceq), initial=0.0))
         return violmx
+
+    def _linear_ub(self):
+        if self.m == 0:
+            return np.empty((0, self.n)), np.empty(0)
+        indices = self.is_linear_cons & np.logical_not(self.is_eq_cons)
+        indices_lower = self.cl[indices] > -1e20
+        indices_upper = self.cu[indices] < 1e20
+        aub = []
+        bub = []
+        for i, index in enumerate(np.flatnonzero(indices)):
+            c_index, g_index = self.cons(np.zeros(self.n), index, True)
+            if indices_lower[i]:
+                aub.append(-g_index)
+                bub.append(c_index - self.cl[index])
+            if indices_upper[i]:
+                aub.append(g_index)
+                bub.append(self.cu[index] - c_index)
+        return np.reshape(aub, (-1, self.n)), np.array(bub)
+
+    def _linear_eq(self):
+        if self.m == 0:
+            return np.empty((0, self.n)), np.empty(0)
+        indices = self.is_linear_cons & self.is_eq_cons
+        aeq = []
+        beq = []
+        for index in np.flatnonzero(indices):
+            c_index, g_index = self.cons(np.zeros(self.n), index, True)
+            aeq.append(g_index)
+            beq.append(0.5 * (self.cl[index] + self.cu[index]) - c_index)
+        return np.reshape(aeq, (-1, self.n)), np.array(beq)
 
     def _project_initial_guess(self):
         c = np.zeros(self.n)

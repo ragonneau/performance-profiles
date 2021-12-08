@@ -35,7 +35,7 @@ class Profiles:
         plt.rc('font', family='serif')
 
     def __call__(self, solvers, options=None, load=True):
-        solvers = sorted(solvers)
+        solvers = sorted(map(str.lower, solvers))
         options = self.set_default_options(options)
 
         self.create_arborescence()
@@ -80,7 +80,7 @@ class Profiles:
         dpi = 200
         maxfev = merits.shape[-1]
         data_y = int(1.2 * maxfev)
-        line_styles = ['-', '--', '-.', ':']
+        styles = ['-', '--', '-.', ':']
 
         merits_min = np.min(merits, axis=(1, 2))
         f0 = merits[..., 0]
@@ -94,16 +94,14 @@ class Profiles:
             conv = np.full_like(f0, np.nan)
             for i, problem in enumerate(self.problems):
                 for j, solver in enumerate(solvers):
-                    tau_conv = tau * f0[i, j]
-                    tau_conv += (1 - tau) * merits_min[i]
-                    if np.min(merits[i, j, :]) <= tau_conv:
-                        conv[i, j] = np.nanargmax(merits[i, j, :] <= tau_conv) + 1
+                    rho = tau * f0[i, j] + (1 - tau) * merits_min[i]
+                    if np.min(merits[i, j, :]) <= rho:
+                        conv[i, j] = np.argmax(merits[i, j, :] <= rho) + 1
 
             perf = np.full_like(f0, np.nan)
             for i, problem in enumerate(self.problems):
                 if not np.all(np.isnan(conv[i, :])):
-                    perf[i, :] = conv[i, :]
-                    perf[i] /= np.nanmin(conv[i, :])
+                    perf[i, :] = conv[i, :] / np.nanmin(conv[i, :])
             perf = np.log2(perf)
             ratio_max = max(ratio_max, np.nanmax(perf))
             perf[np.isnan(perf)] = penalty * ratio_max
@@ -111,8 +109,9 @@ class Profiles:
             data = np.full((len(solvers), data_y), np.nan)
             for j in range(len(solvers)):
                 for k in range(maxfev):
-                    data[j, k] = np.where(conv[:, j] <= k)[0].size / len(self.problems)
+                    data[j, k] = np.where(conv[:, j] <= k)[0].size
                 data[j, maxfev:] = data[j, maxfev - 1]
+            data /= len(self.problems)
 
             fig = plt.figure(dpi=dpi)
             ax = fig.add_subplot(111)
@@ -122,12 +121,15 @@ class Profiles:
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
             for j, solver in enumerate(solvers):
-                x = np.repeat(np.sort(perf[:, j]), 2)[1:]
-                y = np.repeat(np.linspace(1 / len(self.problems), 1, len(self.problems)), 2)[:-1]
+                x = np.sort(perf[:, j])
+                y = np.linspace(1 / len(self.problems), 1, len(self.problems))
+                x = np.repeat(x, 2)[1:]
+                y = np.repeat(y, 2)[:-1]
                 x = np.r_[0, x[0], x, penalty * ratio_max]
                 y = np.r_[0, 0, y, y[-1]]
-                plt.plot(x, y, line_styles[j % len(line_styles)], label=solvers[j], linewidth=1)
-            plt.xlim(0, 1.1 * max(0.01, ratio_max))
+                fmt = styles[j % len(styles)]
+                plt.plot(x, y, fmt, label=solvers[j], linewidth=1)
+            plt.xlim(0, 1.1 * max(1e-2, ratio_max))
             plt.ylim(0, 1.1)
             plt.xlabel(r'$\log_2(\mathrm{NF}/\mathrm{NF}_{\min})$')
             plt.ylabel(fr'Performance profile ($\tau=10^{{-{prec}}}$)')
@@ -137,16 +139,18 @@ class Profiles:
 
             fig = plt.figure(dpi=dpi)
             ax = fig.add_subplot(111)
-            ax.yaxis.tick_left()
             ax.yaxis.set_ticks_position('both')
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
             for j, solver in enumerate(solvers):
-                x = np.repeat(np.linspace(0, data_y / (self.n + 1), data_y), 2)[1:]
-                y = np.repeat(data[j, :], 2)[:-1]
-                plt.plot(x, y, line_styles[j % len(line_styles)], label=solvers[j], linewidth=1)
-            plt.xlim(0, 1.1 * max(0.01, ratio_max))
+                x = np.linspace(0, data_y / (self.n + 1), data_y)
+                y = data[j, :]
+                x = np.repeat(x, 2)[1:]
+                y = np.repeat(y, 2)[:-1]
+                fmt = styles[j % len(styles)]
+                plt.plot(x, y, fmt, label=solvers[j], linewidth=1)
+            plt.xlim(0, 1.1 * max(1e-2, ratio_max))
             plt.ylim(0, 1.1)
             plt.xlabel(r'$\mathrm{NF}/(n+1)$')
             plt.ylabel(fr'Data profile ($\tau=10^{{-{prec}}}$)')
@@ -160,9 +164,8 @@ class Profiles:
         options = self.set_default_options(options)
         maxfev = options.get('maxfev')
         merits = np.empty((len(self.problems), len(solvers), maxfev))
-        n_problems = len(self.problems)
         for i, problem in enumerate(self.problems):
-            print(f'Solving {problem.name} ({i + 1}/{n_problems})...')
+            print(f'Solving {problem.name} ({i + 1}/{len(self.problems)})...')
             for j, solver in enumerate(solvers):
                 print(f'{solver:>10}:', end=' ')
                 rec_path = self.get_rec_path(problem, solver)
@@ -219,15 +222,19 @@ class Profiles:
                 kwargs['method'] = solver.lower()
             constraints = []
             if problem.mlub > 0:
-                constraints.append(pdfo.LinearConstraint(problem.aub, -np.inf, problem.bub))
+                c = pdfo.LinearConstraint(problem.aub, -np.inf, problem.bub)
+                constraints.append(c)
             if problem.mleq > 0:
-                constraints.append(pdfo.LinearConstraint(problem.aeq, problem.beq, problem.beq))
+                c = pdfo.LinearConstraint(problem.aeq, problem.beq, problem.beq)
+                constraints.append(c)
             if problem.mnlub > 0:
                 dub = np.zeros(problem.mnlub)
-                constraints.append(pdfo.NonlinearConstraint(problem.cub, -np.inf, dub))
+                c = pdfo.NonlinearConstraint(problem.cub, -np.inf, dub)
+                constraints.append(c)
             if problem.mnleq > 0:
                 deq = np.zeros(problem.mnleq)
-                constraints.append(pdfo.NonlinearConstraint(problem.ceq, deq, deq))
+                c = pdfo.NonlinearConstraint(problem.ceq, deq, deq)
+                constraints.append(c)
             if len(constraints) > 0:
                 kwargs['constraints'] = constraints
             res = pdfo.pdfo(**kwargs)
