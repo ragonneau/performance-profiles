@@ -24,7 +24,7 @@ class Profiles:
 
         self.perf_dir = Path(ARCH_DIR, 'performance', str(self.n))
         self.data_dir = Path(ARCH_DIR, 'data', str(self.n))
-        self.eval_dir = Path(ARCH_DIR, 'tables')
+        self.eval_dir = Path(ARCH_DIR, 'history')
 
         self.problems = CUTEstProblems(self.n, self.constraints, callback)
         print()
@@ -170,15 +170,22 @@ class Profiles:
             for j, solver in enumerate(solvers):
                 print(f'{solver:>10}:', end=' ')
                 rec_path = self.get_rec_path(problem, solver)
-                if load and rec_path.is_file():
+                loaded = load and rec_path.is_file()
+                if loaded:
                     history = np.load(rec_path)  # noqa
                     nfev = np.argmax(np.isnan(history))
                     if nfev == 0:
-                        nfev = maxfev
-                    merit = np.min(history[:nfev])
-                    print(f'merit = {merit:.4e},', end=' ')
-                    print(f'nfev = {nfev} (loaded).')
-                else:
+                        nfev = history.size
+                    if nfev == history.size and maxfev > history.size:
+                        loaded = False
+                    else:
+                        merits[i, j, :nfev] = history[:nfev]
+                        merits[i, j, nfev:] = merits[i, j, nfev - 1]
+                        nfev = min(nfev, maxfev)
+                        merit = np.min(history[:nfev])
+                        print(f'merit = {merit:.4e},', end=' ')
+                        print(f'nfev = {nfev} (loaded).')
+                if not loaded:
                     with warnings.catch_warnings():
                         warnings.simplefilter('ignore')
                         res = self.minimize(problem, solver, options)
@@ -188,11 +195,11 @@ class Profiles:
                     print(f'nfev = {res.nfev}.')
 
                     nfev = min(res.nfev, maxfev)
+                    merits[i, j, :nfev] = res.merits[:nfev]
+                    merits[i, j, nfev:] = merits[i, j, nfev - 1]
                     history = np.full(maxfev, np.nan)
                     history[:nfev] = res.merits[:nfev]
                     np.save(rec_path, history)  # noqa
-                history[nfev:] = history[nfev - 1]
-                merits[i, j, :] = history
         return merits
 
     def minimize(self, problem, solver, options):
@@ -254,5 +261,5 @@ class Profiles:
         if maxcv >= 1e-2:
             merits.append(nan)
         else:
-            merits.append(np.nan_to_num(fx + 1e6 * maxcv, nan=nan))
+            merits.append(np.nan_to_num(fx + 1e3 * maxcv, nan=nan))
         return fx
