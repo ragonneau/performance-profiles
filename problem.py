@@ -4,7 +4,7 @@ from subprocess import DEVNULL, PIPE, Popen
 
 import numpy as np
 import pycutest
-from scipy.optimize import linprog
+from scipy.optimize import Bounds, minimize
 
 
 class CUTEstProblems(list):
@@ -30,15 +30,14 @@ class CUTEstProblems(list):
             except (AttributeError, ModuleNotFoundError, RuntimeError):
                 print('Internal errors occurred.')
 
-    def append(self, problem, callback=None):
-        if self._validate(problem, callback):
-            super().append(problem)
+    def append(self, p, callback=None):
+        if self._validate(p, callback):
+            super().append(p)
             print('Loading successful.')
         else:
             print('Validation failed.')
 
     def _validate(self, problem, callback=None):
-        # properties = pycutest.problem_properties(problem.name)
         valid = isinstance(problem, CUTEstProblem)
         valid = valid and np.all(problem.vartype == 0)
         valid = valid and problem.n <= self._n
@@ -47,7 +46,7 @@ class CUTEstProblems(list):
         return valid
 
     @staticmethod
-    def _sif_decode(name, parameter='N'):
+    def _sif_decode(name, param='N'):
         cmd = [pycutest.get_sifdecoder_path(), '-show', name]
         sp = Popen(cmd, universal_newlines=True, stdout=PIPE, stderr=DEVNULL)
         sif_stdout = sp.stdout.read()
@@ -57,15 +56,15 @@ class CUTEstProblems(list):
         sif = []
         for stdout in sif_stdout.split('\n'):
             sif_match = regex.match(stdout)
-            if sif_match and sif_match.group('param') == parameter:
+            if sif_match and sif_match.group('param') == param:
                 sif.append(int(sif_match.group('value')))
         return np.sort(sif)
 
 
 class CUTEstProblem:
 
-    def __init__(self, problem_name, *args, **kwargs):
-        self._p = pycutest.import_problem(problem_name, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        self._p = pycutest.import_problem(*args, **kwargs)
         self._xl = None
         self._xu = None
         self._aub = None
@@ -176,15 +175,15 @@ class CUTEstProblem:
         if self.m == 0:
             return np.empty(0)
         x = np.asarray(x)
-        indices = np.logical_not(self.is_linear_cons | self.is_eq_cons)
-        indices_lower = self.cl[indices] > -1e20
-        indices_upper = self.cu[indices] < 1e20
+        iub = np.logical_not(self.is_linear_cons | self.is_eq_cons)
+        iub_lower = self.cl[iub] > -1e20
+        iub_upper = self.cu[iub] < 1e20
         cx = []
-        for i, index in enumerate(np.flatnonzero(indices)):
+        for i, index in enumerate(np.flatnonzero(iub)):
             c_index = self.cons(x, index)
-            if indices_lower[i]:
+            if iub_lower[i]:
                 cx.append(self.cl[index] - c_index)
-            if indices_upper[i]:
+            if iub_upper[i]:
                 cx.append(c_index - self.cu[index])
         return np.array(cx)
 
@@ -192,15 +191,15 @@ class CUTEstProblem:
         if self.m == 0:
             return np.empty((0, self.n))
         x = np.asarray(x)
-        indices = np.logical_not(self.is_linear_cons | self.is_eq_cons)
-        indices_lower = self.cl[indices] > -1e20
-        indices_upper = self.cu[indices] < 1e20
+        iub = np.logical_not(self.is_linear_cons | self.is_eq_cons)
+        iub_lower = self.cl[iub] > -1e20
+        iub_upper = self.cu[iub] < 1e20
         gx = []
-        for i, index in enumerate(np.flatnonzero(indices)):
+        for i, index in enumerate(np.flatnonzero(iub)):
             _, g_index = self.cons(x, index, True)
-            if indices_lower[i]:
+            if iub_lower[i]:
                 gx.append(-g_index)
-            if indices_upper[i]:
+            if iub_upper[i]:
                 gx.append(g_index)
         return np.reshape(gx, (-1, self.n))
 
@@ -208,9 +207,9 @@ class CUTEstProblem:
         if self.m == 0:
             return np.empty(0)
         x = np.asarray(x)
-        indices = np.logical_not(self.is_linear_cons) & self.is_eq_cons
+        ieq = np.logical_not(self.is_linear_cons) & self.is_eq_cons
         cx = []
-        for index in np.flatnonzero(indices):
+        for index in np.flatnonzero(ieq):
             c_index = self.cons(x, index)
             cx.append(c_index - 0.5 * (self.cl[index] + self.cu[index]))
         return np.array(cx)
@@ -219,9 +218,9 @@ class CUTEstProblem:
         if self.m == 0:
             return np.empty((0, self.n))
         x = np.asarray(x)
-        indices = np.logical_not(self.is_linear_cons) & self.is_eq_cons
+        ieq = np.logical_not(self.is_linear_cons) & self.is_eq_cons
         gx = []
-        for index in np.flatnonzero(indices):
+        for index in np.flatnonzero(ieq):
             _, g_index = self.cons(x, index, True)
             gx.append(g_index)
         return np.reshape(gx, (-1, self.n))
@@ -238,17 +237,17 @@ class CUTEstProblem:
     def _linear_ub(self):
         if self.m == 0:
             return np.empty((0, self.n)), np.empty(0)
-        indices = self.is_linear_cons & np.logical_not(self.is_eq_cons)
-        indices_lower = self.cl[indices] > -1e20
-        indices_upper = self.cu[indices] < 1e20
+        iub = self.is_linear_cons & np.logical_not(self.is_eq_cons)
+        iub_lower = self.cl[iub] > -1e20
+        iub_upper = self.cu[iub] < 1e20
         aub = []
         bub = []
-        for i, index in enumerate(np.flatnonzero(indices)):
+        for i, index in enumerate(np.flatnonzero(iub)):
             c_index, g_index = self.cons(np.zeros(self.n), index, True)
-            if indices_lower[i]:
+            if iub_lower[i]:
                 aub.append(-g_index)
                 bub.append(c_index - self.cl[index])
-            if indices_upper[i]:
+            if iub_upper[i]:
                 aub.append(g_index)
                 bub.append(self.cu[index] - c_index)
         return np.reshape(aub, (-1, self.n)), np.array(bub)
@@ -256,19 +255,25 @@ class CUTEstProblem:
     def _linear_eq(self):
         if self.m == 0:
             return np.empty((0, self.n)), np.empty(0)
-        indices = self.is_linear_cons & self.is_eq_cons
+        ieq = self.is_linear_cons & self.is_eq_cons
         aeq = []
         beq = []
-        for index in np.flatnonzero(indices):
+        for index in np.flatnonzero(ieq):
             c_index, g_index = self.cons(np.zeros(self.n), index, True)
             aeq.append(g_index)
             beq.append(0.5 * (self.cl[index] + self.cu[index]) - c_index)
         return np.reshape(aeq, (-1, self.n)), np.array(beq)
 
     def _project_initial_guess(self):
-        c = np.zeros(self.n)
-        bounds = list(zip(self.xl, self.xu))
+        bounds = Bounds(self.xl, self.xu)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
-            res = linprog(c, self.aub, self.bub, self.aeq, self.beq, bounds)
+            res = minimize(self._cpqp_obj, self.x0, jac=True, bounds=bounds)
         self.x0 = res.x
+
+    def _cpqp_obj(self, x):
+        cub = np.maximum(0.0, np.dot(self.aub, x) - self.bub)
+        ceq = np.dot(self.aeq, x) - self.beq
+        fx = 0.5 * (np.inner(cub, cub) + np.inner(ceq, ceq))
+        gx = np.dot(self.aub.T, cub) + np.dot(self.aeq.T, ceq)
+        return fx, gx
