@@ -18,7 +18,6 @@ class Minimizer:
     def run(self):
         self._merits = []
         if self._solver.lower() == 'cobyqa':
-            self._options['debug'] = True
             res = minimize(self._eval, self._problem.x0, xl=self._problem.xl,
                            xu=self._problem.xu, Aub=self._problem.aub,
                            bub=self._problem.bub, Aeq=self._problem.aeq,
@@ -60,7 +59,7 @@ class Minimizer:
             else:
                 res = scipy_minimize(self._eval, self._problem.x0,
                                      method=self._solver, bounds=bounds,
-                                     constraints=constraints,
+                                     constraints=constraints,  # noqa
                                      options=self._options)
                 if self._problem.type in 'XBLQO':
                     res.maxcv = self._problem.maxcv(res.x)
@@ -68,12 +67,14 @@ class Minimizer:
         return res
 
     def _validate(self):
-        valid_solvers = {'bfgs', 'bobyqa', 'cg', 'cobyla', 'cobyqa', 'dogleg',
-                         'l-bfgs-b', 'lincoa', 'nelder-mead', 'newuoa', 'pdfo',
-                         'slsqp', 'tnc', 'trust-constr', 'trust-exact',
-                         'trust-krylov', 'trust-ncg', 'uobyqa'}
+        valid_solvers = {'cobyla', 'cobyqa', 'pdfo', 'slsqp'}
+        if self._problem.type not in 'QO':
+            valid_solvers.update({'lincoa'})
+        if self._problem.type not in 'NLQO':
+            valid_solvers.update({'bobyqa', 'l-bfgs-b', 'nelder-mead', 'tnc'})
+        if self._problem.type not in 'XBNLQO':
+            valid_solvers.update({'bfgs', 'cg', 'newuoa', 'uobyqa'})
         valid = self._solver.lower() in valid_solvers
-        # TODO: Check type according to the corresponding solver.
         # TODO: Validate options according to corresponding solver.
         return valid
 

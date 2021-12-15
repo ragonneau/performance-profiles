@@ -1,8 +1,10 @@
 import os
 import warnings
+from itertools import product
 from pathlib import Path
 
 import numpy as np
+from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
 from matplotlib.backends import backend_pdf
 from matplotlib.ticker import MultipleLocator
@@ -23,7 +25,7 @@ class Profiles:
 
         self._perf_dir = Path(ARCH_DIR, 'performance', str(self._n))
         self._data_dir = Path(ARCH_DIR, 'data', str(self._n))
-        self._eval_dir = Path(ARCH_DIR, 'dumping')
+        self._eval_dir = Path(ARCH_DIR, 'bin')
 
         self._problems = CUTEstProblems(self._n, self._constraints, callback)
         print()
@@ -164,52 +166,38 @@ class Profiles:
         options = self.set_default_options(options)
         maxfev = options.get('maxfev')
         merits = np.empty((len(self._problems), len(solvers), maxfev))
-        for i, problem in enumerate(self._problems):
-            print(f'Solving {problem.name} ({i + 1}/{len(self._problems)})...')
-            for j, solver in enumerate(solvers):
-                print(f'{solver:>15}:', end=' ')
-                rec_path = self.get_rec_path(problem, solver)
-                loaded = load and rec_path.is_file()
-                if loaded:
-                    history = np.load(rec_path)  # noqa
-                    if np.isnan(history[-1]):
-                        nfev = np.argmax(np.isnan(history))
-                    else:
-                        nfev = history.size
-                    if nfev == history.size and maxfev > history.size:
-                        loaded = False
-                    else:
-                        merits[i, j, :nfev] = history[:nfev]
-                        merits[i, j, nfev:] = merits[i, j, nfev - 1]
-                        nfev = min(nfev, maxfev)
-                        merit = np.min(history[:nfev])
-                        print(f'merit = {merit:.4e},', end=' ')
-                        print(f'nfev = {nfev} (loaded).')
-                if not loaded:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter('ignore')
-                        minimizer = Minimizer(problem, solver, options)
-                        res = minimizer.run()
-                    print(f'fun = {res.fun:.4e},', end=' ')
-                    if hasattr(res, 'maxcv'):
-                        print(f'maxcv = {res.maxcv:.4e},', end=' ')
-                    print(f'nfev = {res.nfev}.')
-
-                    nfev = min(res.nfev, maxfev)
-                    merits[i, j, :nfev] = res.merits[:nfev]
-                    merits[i, j, nfev:] = merits[i, j, nfev - 1]
-                    history = np.full(maxfev, np.nan)
-                    history[:nfev] = res.merits[:nfev]
-                    np.save(rec_path, history)  # noqa
+        histories = Parallel(n_jobs=-1)(
+            self._run_problem_solver(problem, solver, options, load)
+            for problem, solver in product(self._problems, solvers))
+        for i in range(len(self._problems)):
+            for j in range(len(solvers)):
+                history, nfev = histories[i * len(solvers) + j]
+                merits[i, j, :nfev] = history[:nfev]
+                merits[i, j, nfev:] = merits[i, j, nfev - 1]
         return merits
 
-    @staticmethod
-    def eval(x, problem, merits):
-        fx = problem.fun(x)
-        maxcv = problem.maxcv(x)
-        nan = np.finfo(type(fx)).max
-        if maxcv >= 1e-2:
-            merits.append(nan)
-        else:
-            merits.append(np.nan_to_num(fx + 1e3 * maxcv, nan=nan))
-        return fx
+    @delayed
+    def _run_problem_solver(self, problem, solver, options, load):
+        rec_path = self.get_rec_path(problem, solver)
+        maxfev = options.get('maxfev')
+        history, nfev = None, 0
+        if load and rec_path.is_file():
+            history = np.load(rec_path)  # noqa
+            if np.isnan(history[-1]):
+                nfev = np.argmax(np.isnan(history))
+            else:
+                nfev = history.size
+            if nfev == history.size and maxfev > history.size:
+                history, nfev = None, 0
+        if history is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                minimizer = Minimizer(problem, solver, options)
+                res = minimizer.run()
+            nfev = min(res.nfev, maxfev)
+            history = np.full(maxfev, np.nan)
+            history[:nfev] = res.merits[:nfev]
+            np.save(rec_path, history)  # noqa
+        merit = np.min(history[:nfev])
+        print(f'{problem.name} with {solver}: merit = {merit}, nfev = {nfev}.')
+        return history, nfev

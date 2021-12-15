@@ -26,11 +26,11 @@ from perform import Profiles  # noqa
 
 
 def validate(problem):
-    valid = problem.m <= 50
-    valid = valid and problem.name not in ['CSFI1', 'CSFI2', 'POLAK6', 'HS67']
+    valid = problem.m <= 200
+    valid = valid and problem.name not in ['CSFI1', 'CSFI2', 'POLAK6']
     return valid
 
 
 if __name__ == '__main__':
-    profiles = Profiles(10, constraints='XB', callback=validate)
-    profiles(solvers=['cobyqa', 'nelder-mead'])
+    profiles = Profiles(10, constraints='U', callback=validate)
+    profiles(solvers=['bfgs', 'cg'])

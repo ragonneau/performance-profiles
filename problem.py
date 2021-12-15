@@ -4,6 +4,7 @@ from subprocess import DEVNULL, PIPE, Popen
 
 import numpy as np
 import pycutest
+from joblib import Parallel, delayed
 from scipy.optimize import Bounds, minimize
 
 
@@ -13,29 +14,38 @@ class CUTEstProblems(list):
         super().__init__()
         self._n = n
         names = pycutest.find_problems('CLQSO', constraints, n=[1, self._n])
-        for i, name in enumerate(sorted(names)):
-            try:
-                print(f'Loading {name} ({i + 1}/{len(names)})...', end=' ')
-                if pycutest.problem_properties(name)['n'] is None:
-                    sif = self._sif_decode(name)
-                    if sif.size > 0 and sif[0] <= self._n:
-                        params = {'N': np.max(sif[sif <= self._n])}
-                        problem = CUTEstProblem(name, sifParams=params)
-                        self.append(problem, callback)
-                    else:
-                        print('No compliant SIF parameters found.')
-                else:
-                    problem = CUTEstProblem(name)
-                    self.append(problem, callback)
-            except (AttributeError, ModuleNotFoundError, RuntimeError):
-                print('Internal errors occurred.')
+        attempt = Parallel(n_jobs=-1)(
+            self._load(names, i) for i in range(len(names)))
 
-    def append(self, p, callback=None):
-        if self._validate(p, callback):
-            super().append(p)
-            print('Loading successful.')
+        # We append the problem outside of the parallel area to keep it ordered
+        # and to simplify the memory management.
+        for problem in attempt:
+            if problem is not None:
+                self.append(problem, callback)
+
+    def append(self, problem, callback=None):
+        if self._validate(problem, callback):
+            super().append(problem)
         else:
-            print('Validation failed.')
+            print(f'{problem.name}: Validation failed.')
+
+    @delayed
+    def _load(self, names, i):
+        try:
+            print(f'Attempt loading {names[i]} ({i + 1}/{len(names)}).')
+            if pycutest.problem_properties(names[i])['n'] is None:
+                sif = self._sif_decode(names[i])
+                if sif.size > 0 and sif[0] <= self._n:
+                    params = {'N': np.max(sif[sif <= self._n])}
+                    problem = CUTEstProblem(names[i], sifParams=params)
+                    return problem
+                else:
+                    print(f'{names[i]}: no compliant SIF parameters found.')
+            else:
+                problem = CUTEstProblem(names[i])
+                return problem
+        except (AttributeError, ModuleNotFoundError, RuntimeError):
+            print(f'{names[i]}: Internal errors occurred.')
 
     def _validate(self, problem, callback=None):
         valid = isinstance(problem, CUTEstProblem)
@@ -78,6 +88,12 @@ class CUTEstProblem:
             return getattr(self._p, item)
         except AttributeError as exc:
             raise AttributeError(item) from exc
+
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     def __str__(self):
         return str(self._p)
