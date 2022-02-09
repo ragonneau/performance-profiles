@@ -5,21 +5,20 @@ from subprocess import DEVNULL, PIPE, Popen
 import numpy as np
 import pycutest
 from joblib import Parallel, delayed
-from scipy.optimize import Bounds, minimize
+from scipy.linalg import lstsq
+from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint
+from scipy.optimize import minimize
 
 
 class CUTEstProblems(list):
 
-    def __init__(self, n, constraints, callback=None):
+    def __init__(self, n_min, n_max, constraints, callback=None):
         super().__init__()
-        self._n = n
-        names = pycutest.find_problems('CLQSO', constraints, n=[1, self._n])
-        attempt = Parallel(n_jobs=-1)(
-            self._load(names, i) for i in range(len(names)))
-
-        # We append the problem outside of the parallel area to keep it ordered
-        # and to simplify the memory management.
-        for problem in attempt:
+        self._n_min = n_min
+        self._n_max = n_max
+        names = pycutest.find_problems('CLQSO', constraints, True, n=[self._n_min, self._n_max], userM=False)
+        attempts = Parallel(n_jobs=-1)(self._load(names, i) for i in range(len(names)))
+        for problem in attempts:
             if problem is not None:
                 self.append(problem, callback)
 
@@ -27,30 +26,50 @@ class CUTEstProblems(list):
         if self._validate(problem, callback):
             super().append(problem)
         else:
-            print(f'{problem.name}: Validation failed.')
+            print(f'{problem.name}: validation failed.')
 
     @delayed
     def _load(self, names, i):
         try:
             print(f'Attempt loading {names[i]} ({i + 1}/{len(names)}).')
             if pycutest.problem_properties(names[i])['n'] is None:
-                sif = self._sif_decode(names[i])
-                if sif.size > 0 and sif[0] <= self._n:
-                    params = {'N': np.max(sif[sif <= self._n])}
-                    problem = CUTEstProblem(names[i], sifParams=params)
-                    return problem
+                if names[i] in ['ARGLALE', 'ARGLBLE', 'ARGLCLE', 'BA-L16LS',
+                                'BA-L21', 'BA-L21LS', 'BA-L49', 'BA-L49LS',
+                                'BA-L52', 'BA-L52LS', 'BA-L73', 'BA-L73LS',
+                                'BDRY2', 'CHANDHEU', 'CHARDIS0', 'CHARDIS1',
+                                'DANWOODLS', 'DMN15102', 'DMN15102LS',
+                                'DMN15103', 'DMN15103LS', 'DMN15332',
+                                'DMN15332LS', 'DMN15333', 'DMN15333LS',
+                                'DMN37142', 'DMN37142LS', 'DMN37143',
+                                'DMN37143LS', 'GAUSS1LS', 'GAUSS2LS',
+                                'GAUSS3LS', 'GAUSSELM', 'GOFFIN', 'GPP',
+                                'KOEBHELB', 'LEUVEN3', 'LEUVEN4', 'LEUVEN5',
+                                'LEUVEN6', 'LHAIFAM', 'LINCONT', 'LIPPERT2',
+                                'LOBSTERZ', 'MGH17LS', 'MISRA1ALS', 'MISRA1CLS',
+                                'MODEL', 'NASH', 'NELSONLS', 'OSBORNEA', 'PDE1',
+                                'PDE2', 'PENALTY3', 'RAT43LS', 'RDW2D51F',
+                                'RDW2D51U', 'RDW2D52B', 'RDW2D52F', 'RDW2D52U',
+                                'ROSEPETAL', 'TWOD', 'WALL100', 'YATP1SQ',
+                                'YATP2SQ']:
+                    print(f'{names[i]}: no compilation attempted.')
                 else:
-                    print(f'{names[i]}: no compliant SIF parameters found.')
+                    sif = self._sif_decode(names[i])
+                    mask = (sif >= self._n_min) & (sif <= self._n_max)
+                    if np.any(mask):
+                        return CUTEstProblem(names[i], sifParams={'N': np.max(sif[mask])}, drop_fixed_variables=False)
+                    else:
+                        print(f'{names[i]}: no compliant SIF parameters found.')
             else:
-                problem = CUTEstProblem(names[i])
+                problem = CUTEstProblem(names[i], drop_fixed_variables=False)
                 return problem
-        except (AttributeError, ModuleNotFoundError, RuntimeError):
-            print(f'{names[i]}: Internal errors occurred.')
+        except (AttributeError, ModuleNotFoundError, RuntimeError, FileNotFoundError):
+            print(f'{names[i]}: internal errors occurred.')
 
     def _validate(self, problem, callback=None):
         valid = isinstance(problem, CUTEstProblem)
         valid = valid and np.all(problem.vartype == 0)
-        valid = valid and problem.n <= self._n
+        valid = valid and problem.n >= self._n_min
+        valid = valid and problem.n <= self._n_max
         if callback is not None:
             valid = valid and callback(problem)
         return valid
@@ -81,7 +100,7 @@ class CUTEstProblem:
         self._bub = None
         self._aeq = None
         self._beq = None
-        self._project_initial_guess()
+        self._project_x0()
 
     def __getattr__(self, item):
         try:
@@ -102,7 +121,7 @@ class CUTEstProblem:
     def xl(self):
         if self._xl is not None:
             return self._xl
-        self._xl = self.bl
+        self._xl = np.array(self.bl, dtype=float)
         self._xl[self._xl <= -1e20] = -np.inf
         return self._xl
 
@@ -110,7 +129,7 @@ class CUTEstProblem:
     def xu(self):
         if self._xu is not None:
             return self._xu
-        self._xu = self.bu
+        self._xu = np.array(self.bu, dtype=float)
         self._xu[self._xu >= 1e20] = np.inf
         return self._xu
 
@@ -180,17 +199,17 @@ class CUTEstProblem:
         return properties.get('constraints')
 
     def fun(self, x, gradient=False):
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         return self.obj(x, gradient)
 
     def hess(self, x):
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         return self.hess(x)
 
     def cub(self, x):
         if self.m == 0:
             return np.empty(0)
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         iub = np.logical_not(self.is_linear_cons | self.is_eq_cons)
         iub_lower = self.cl[iub] > -1e20
         iub_upper = self.cu[iub] < 1e20
@@ -201,12 +220,12 @@ class CUTEstProblem:
                 cx.append(self.cl[index] - c_index)
             if iub_upper[i]:
                 cx.append(c_index - self.cu[index])
-        return np.array(cx)
+        return np.array(cx, dtype=float)
 
     def cub_jac(self, x):
         if self.m == 0:
             return np.empty((0, self.n))
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         iub = np.logical_not(self.is_linear_cons | self.is_eq_cons)
         iub_lower = self.cl[iub] > -1e20
         iub_upper = self.cu[iub] < 1e20
@@ -217,28 +236,30 @@ class CUTEstProblem:
                 gx.append(-g_index)
             if iub_upper[i]:
                 gx.append(g_index)
+        gx = np.array(gx, dtype=float)
         return np.reshape(gx, (-1, self.n))
 
     def ceq(self, x):
         if self.m == 0:
             return np.empty(0)
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         ieq = np.logical_not(self.is_linear_cons) & self.is_eq_cons
         cx = []
         for index in np.flatnonzero(ieq):
             c_index = self.cons(x, index)
             cx.append(c_index - 0.5 * (self.cl[index] + self.cu[index]))
-        return np.array(cx)
+        return np.array(cx, dtype=float)
 
     def ceq_jac(self, x):
         if self.m == 0:
             return np.empty((0, self.n))
-        x = np.asarray(x)
+        x = np.asarray(x, dtype=float)
         ieq = np.logical_not(self.is_linear_cons) & self.is_eq_cons
         gx = []
         for index in np.flatnonzero(ieq):
             _, g_index = self.cons(x, index, True)
             gx.append(g_index)
+        gx = np.array(gx, dtype=float)
         return np.reshape(gx, (-1, self.n))
 
     def maxcv(self, x):
@@ -266,6 +287,7 @@ class CUTEstProblem:
             if iub_upper[i]:
                 aub.append(g_index)
                 bub.append(self.cu[index] - c_index)
+        aub = np.array(aub, dtype=float)
         return np.reshape(aub, (-1, self.n)), np.array(bub)
 
     def _linear_eq(self):
@@ -277,19 +299,36 @@ class CUTEstProblem:
         for index in np.flatnonzero(ieq):
             c_index, g_index = self.cons(np.zeros(self.n), index, True)
             aeq.append(g_index)
-            beq.append(0.5 * (self.cl[index] + self.cu[index]) - c_index)
+            beq.append(c_index - 0.5 * (self.cl[index] + self.cu[index]))
+        aeq = np.array(aeq, dtype=float)
         return np.reshape(aeq, (-1, self.n)), np.array(beq)
 
-    def _project_initial_guess(self):
-        bounds = Bounds(self.xl, self.xu)
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            res = minimize(self._cpqp_obj, self.x0, jac=True, bounds=bounds)
-        self.x0 = res.x
+    def _project_x0(self):
+        if self.m == 0:
+            self.x0 = np.minimum(self.xu, np.maximum(self.xl, self.x0))
+        elif self.mlub == 0 and self.mleq > 0 and np.all(self.xl == -np.inf) and np.all(self.xu == np.inf):
+            self.x0 = lstsq(self.aeq, self.beq - np.dot(self.aeq, self.x0))[0]
+        else:
+            bounds = Bounds(self.xl, self.xu)
+            constraints = []
+            if self.mlub > 0:
+                constraints.append(LinearConstraint(self.aub, -np.inf, self.bub))
+            if self.mleq > 0:
+                constraints.append(LinearConstraint(self.aeq, self.beq, self.beq))
+            if self.mnlub > 0:
+                rhs = np.zeros(self.mnlub, dtype=float)
+                constraints.append(NonlinearConstraint(self.cub, -np.inf, rhs, self.cub_jac))
+            if self.mnleq > 0:
+                rhs = np.zeros(self.mnleq, dtype=float)
+                constraints.append(NonlinearConstraint(self.ceq, rhs, rhs, self.ceq_jac))
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                res = minimize(self._distance, self.x0, jac=True, bounds=bounds,
+                               constraints=constraints)  # noqa
+            self.x0 = np.array(res.x, dtype=float)
 
-    def _cpqp_obj(self, x):
-        cub = np.maximum(0.0, np.dot(self.aub, x) - self.bub)
-        ceq = np.dot(self.aeq, x) - self.beq
-        fx = 0.5 * (np.inner(cub, cub) + np.inner(ceq, ceq))
-        gx = np.dot(self.aub.T, cub) + np.dot(self.aeq.T, ceq)
+    def _distance(self, x):
+        x = np.asarray(x, dtype=float)
+        fx = 0.5 * np.inner(x - self.x0, x - self.x0)
+        gx = x - self.x0
         return fx, gx
