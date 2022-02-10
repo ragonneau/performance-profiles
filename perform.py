@@ -86,7 +86,6 @@ class Profiles:
         penalty = 2
         dpi = 200
         maxfev = merits.shape[-1]
-        data_y = int(1.2 * maxfev)
         styles = ['-', '--', '-.', ':']
 
         solutions = np.nanmin(merits, axis=(1, 2))
@@ -113,11 +112,10 @@ class Profiles:
             ratio_max = np.nanmax(perf, initial=0.0)
             perf[np.isnan(perf)] = penalty * ratio_max
 
-            data = np.full((len(solvers), data_y), np.nan, dtype=float)
+            data = np.full((len(solvers), maxfev), np.nan, dtype=float)
             for j in range(len(solvers)):
                 for k in range(maxfev):
-                    data[j, k] = np.where(work[:, j] <= k)[0].size
-                data[j, maxfev:] = data[j, maxfev - 1]
+                    data[j, k] = np.count_nonzero(work[:, j] <= k)
             data /= len(self._problems)
 
             fig = plt.figure(dpi=dpi)
@@ -149,7 +147,7 @@ class Profiles:
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
             for j, solver in enumerate(solvers):
-                x = np.repeat(np.linspace(0, data_y / (self._n_max + 1), data_y), 2)[1:]
+                x = np.repeat(np.linspace(0, maxfev / (self._n_max + 1), maxfev), 2)[1:]
                 y = np.repeat(data[j, :], 2)[:-1]
                 plt.plot(x, y, styles[j % len(styles)], label=solvers[j], linewidth=1)
             plt.xlim(0, 1.1 * ratio_max)
@@ -221,11 +219,11 @@ class Profiles:
     def _merit(obj_hist, mcv_hist, huge, **kwargs):
         merits = np.empty_like(obj_hist)
         for i in range(merits.size):
-            if mcv_hist[i] <= kwargs.get('eta1', 1e-13):
+            if mcv_hist[i] <= kwargs.get('eta1', 1e-12):
                 merits[i] = obj_hist[i]
-            elif mcv_hist[i] >= kwargs.get('eta2', 1e-5):
+            elif mcv_hist[i] >= kwargs.get('eta2', 1e-2):
                 merits[i] = huge
             else:
-                merits[i] = obj_hist[i] + kwargs.get('eta3', 1e6) * mcv_hist[i]
+                merits[i] = obj_hist[i] + kwargs.get('eta3', 1e3) * mcv_hist[i]
             merits[i] = np.nan_to_num(merits[i], nan=huge)
         return merits

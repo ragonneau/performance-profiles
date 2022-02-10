@@ -17,7 +17,7 @@ class CUTEstProblems(list):
         self._n_min = n_min
         self._n_max = n_max
         names = pycutest.find_problems('CLQSO', constraints, True, n=[self._n_min, self._n_max], userM=False)
-        attempts = Parallel(n_jobs=-1)(self._load(names, i) for i in range(len(names)))
+        attempts = Parallel(n_jobs=-1)(self._load(sorted(names), i) for i in range(len(names)))
         for problem in attempts:
             if problem is not None:
                 self.append(problem, callback)
