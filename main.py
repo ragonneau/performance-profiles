@@ -18,7 +18,6 @@ elif sys.platform == 'darwin':
 else:
     raise NotImplementedError
 os.environ.setdefault('PYCUTEST_CACHE', 'archives')
-sys.path.append(os.path.abspath(os.environ['PYCUTEST_CACHE']))
 BASE_DIR = Path(__file__).resolve(strict=True).parent
 ARCH_DIR = Path(BASE_DIR, os.environ.get('PYCUTEST_CACHE'))
 ARCH_DIR.mkdir(exist_ok=True)
