@@ -309,7 +309,7 @@ class CUTEstProblem:
         elif self.mlub == 0 and self.mleq > 0 and np.all(self.xl == -np.inf) and np.all(self.xu == np.inf):
             self.x0 = lstsq(self.aeq, self.beq - np.dot(self.aeq, self.x0))[0]
         else:
-            bounds = Bounds(self.xl, self.xu)
+            bounds = Bounds(self.xl, self.xu, True)
             constraints = []
             if self.mlub > 0:
                 constraints.append(LinearConstraint(self.aub, -np.inf, self.bub))
