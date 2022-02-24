@@ -1,8 +1,5 @@
 import numpy as np
 import pdfo
-from cobyqa import minimize
-from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint
-from scipy.optimize import minimize as scipy_minimize
 
 
 class Minimizer:
@@ -20,12 +17,16 @@ class Minimizer:
         self._obj_hist = []
         self._mcv_hist = []
         if self._solver.lower() == 'cobyqa':
+            from cobyqa import minimize
             res = minimize(self._eval, self._problem.x0, xl=self._problem.xl,
                            xu=self._problem.xu, Aub=self._problem.aub,
                            bub=self._problem.bub, Aeq=self._problem.aeq,
                            beq=self._problem.beq, cub=self._problem.cub,
                            ceq=self._problem.ceq, options=self._options)
         else:
+            from scipy.optimize import Bounds, LinearConstraint, \
+                NonlinearConstraint
+            from scipy.optimize import minimize
             bounds = Bounds(self._problem.xl, self._problem.xu)
             constraints = []
             if self._problem.mlub > 0:
@@ -55,10 +56,10 @@ class Minimizer:
                 if hasattr(res, 'constrviolation'):
                     del res.constrviolation
             else:
-                res = scipy_minimize(self._eval, self._problem.x0,
-                                     method=self._solver, bounds=bounds,
-                                     constraints=constraints,  # noqa
-                                     options=self._options)
+                res = minimize(self._eval, self._problem.x0,
+                               method=self._solver, bounds=bounds,
+                               constraints=constraints,  # noqa
+                               options=self._options)
                 if self._problem.type in 'XBLQO':
                     res.maxcv = self._problem.maxcv(res.x)
         obj_hist = np.array(self._obj_hist, dtype=float)

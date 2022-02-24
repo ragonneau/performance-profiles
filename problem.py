@@ -10,7 +10,7 @@ from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint
 from scipy.optimize import minimize
 
 
-class CUTEstProblems(list):
+class Problems(list):
 
     def __init__(self, n_min, n_max, constraints, callback=None):
         super().__init__()
@@ -56,17 +56,17 @@ class CUTEstProblems(list):
                     sif = self._sif_decode(names[i])
                     mask = (sif >= self._n_min) & (sif <= self._n_max)
                     if np.any(mask):
-                        return CUTEstProblem(names[i], sifParams={'N': np.max(sif[mask])}, drop_fixed_variables=False)
+                        return Problem(names[i], sifParams={'N': np.max(sif[mask])}, drop_fixed_variables=False)
                     else:
                         print(f'{names[i]}: no compliant SIF parameters found.')
             else:
-                problem = CUTEstProblem(names[i], drop_fixed_variables=False)
+                problem = Problem(names[i], drop_fixed_variables=False)
                 return problem
         except (AttributeError, ModuleNotFoundError, RuntimeError, FileNotFoundError):
             print(f'{names[i]}: internal errors occurred.')
 
     def _validate(self, problem, callback=None):
-        valid = isinstance(problem, CUTEstProblem)
+        valid = isinstance(problem, Problem)
         valid = valid and np.all(problem.vartype == 0)
         valid = valid and problem.n >= self._n_min
         valid = valid and problem.n <= self._n_max
@@ -90,7 +90,7 @@ class CUTEstProblems(list):
         return np.sort(sif)
 
 
-class CUTEstProblem:
+class Problem:
 
     def __init__(self, *args, **kwargs):
         self._p = pycutest.import_problem(*args, **kwargs)

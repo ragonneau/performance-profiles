@@ -1,3 +1,4 @@
+import csv
 import os
 import warnings
 from itertools import product
@@ -10,7 +11,7 @@ from matplotlib.backends import backend_pdf
 from matplotlib.ticker import MultipleLocator
 
 from optimize import Minimizer
-from problem import CUTEstProblems
+from problem import Problems
 
 BASE_DIR = Path(__file__).resolve(strict=True).parent
 ARCH_DIR = Path(BASE_DIR, os.environ.get('PYCUTEST_CACHE'))
@@ -24,16 +25,17 @@ class Profiles:
         self._feature = feature
         self._constraints = constraints
 
-        self._perf_dir = Path(ARCH_DIR, 'performance', f'{self._n_min}-{self._n_max}')
-        self._data_dir = Path(ARCH_DIR, 'data', f'{self._n_min}-{self._n_max}')
-        self._eval_dir = Path(ARCH_DIR, 'storage')
+        n_string = f'{self._n_min}-{self._n_max}'
+        self._perf_dir = Path(ARCH_DIR, 'performance', self._feature, n_string)
+        self._data_dir = Path(ARCH_DIR, 'data', self._feature, n_string)
+        self._eval_dir = Path(ARCH_DIR, 'storage', self._feature)
 
-        self._problems = CUTEstProblems(self._n_min, self._n_max, self._constraints, callback)
+        self._problems = Problems(self._n_min, self._n_max, self._constraints, callback)
         print()
         print(f'*** {len(self._problems)} problem(s) loaded ***')
         print()
         if len(self._problems) == 0:
-            raise RuntimeError
+            raise RuntimeError('No problem loaded')
 
         plt.rc('text', usetex=True)
         plt.rc('font', family='serif')
@@ -71,37 +73,48 @@ class Profiles:
 
     def get_performance_path(self, solvers):
         solvers = '_'.join(sorted(solvers))
-        filename = f'perf-{solvers}-{self._constraints}.pdf'
-        return Path(self._perf_dir, filename)
+        pdf = Path(self._perf_dir, f'perf-{solvers}-{self._constraints}.pdf')
+        csv = Path(self._perf_dir, f'perf-{solvers}-{self._constraints}.csv')
+        return pdf, csv
 
     def get_data_path(self, solvers):
         solvers = '_'.join(sorted(map(str.lower, solvers)))
-        filename = f'data-{solvers}-{self._constraints}.pdf'
-        return Path(self._data_dir, filename)
+        pdf = Path(self._data_dir, f'data-{solvers}-{self._constraints}.pdf')
+        csv = Path(self._data_dir, f'data-{solvers}-{self._constraints}.csv')
+        return pdf, csv
 
     def profiles(self, solvers, options=None, load=True, **kwargs):
         options = self.set_default_options(options)
         merits = self.run_solvers(solvers, options, load, **kwargs)
 
+        prec_min = 1
+        prec_max = 9
         penalty = 2
+        ratio_max = 1e-6
         dpi = 200
         maxfev = merits.shape[-1]
         styles = ['-', '--', '-.', ':']
 
-        solutions = np.nanmin(merits, axis=(1, 2))
         f0 = merits[..., 0]
-        pdf_perf = backend_pdf.PdfPages(self.get_performance_path(solvers))
-        pdf_data = backend_pdf.PdfPages(self.get_data_path(solvers))
+        sols = np.nanmin(merits, axis=(1, 2))
+
+        pdf_perf_path, csv_perf_path = self.get_performance_path(solvers)
+        pdf_data_path, csv_data_path = self.get_data_path(solvers)
+        n_col = (prec_max - prec_min + 1) * (len(solvers) + 1)
+        raw_perf = np.empty((2 * len(self._problems) + 2, n_col), dtype=float)
+        raw_data = np.empty((2 * maxfev - 1, n_col), dtype=float)
+        pdf_perf = backend_pdf.PdfPages(pdf_perf_path)
+        pdf_data = backend_pdf.PdfPages(pdf_data_path)
         print()
-        for prec in range(1, 10):
+        for prec in range(prec_min, prec_max + 1):
             print(f'Creating plots with tau = 1e-{prec}.')
             tau = 10 ** (-prec)
 
             work = np.full_like(f0, np.nan)
             for i, problem in enumerate(self._problems):
                 for j, solver in enumerate(solvers):
-                    rho = tau * f0[i, j] + (1.0 - tau) * solutions[i]
-                    if not np.all(np.isnan(merits[i, j, :])) and np.nanmin(merits[i, j, :]) <= rho:
+                    rho = tau * f0[i, j] + (1.0 - tau) * sols[i]
+                    if np.nanmin(merits[i, j, :], initial=np.inf) <= rho:
                         work[i, j] = np.argmax(merits[i, j, :] <= rho) + 1
 
             perf = np.full_like(f0, np.nan)
@@ -109,7 +122,7 @@ class Profiles:
                 if not np.all(np.isnan(work[i, :])):
                     perf[i, :] = work[i, :] / np.nanmin(work[i, :])
             perf = np.log2(perf)
-            ratio_max = np.nanmax(perf, initial=0.0)
+            ratio_max = np.nanmax(perf, initial=ratio_max)
             perf[np.isnan(perf)] = penalty * ratio_max
 
             data = np.full((len(solvers), maxfev), np.nan, dtype=float)
@@ -125,12 +138,16 @@ class Profiles:
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
+            y = np.linspace(1 / len(self._problems), 1, len(self._problems))
+            y = np.repeat(y, 2)[:-1]
+            y = np.r_[0, 0, y, y[-1]]
+            i_col = (prec - 1) * (len(solvers) + 1)
+            raw_perf[:, i_col] = y
             for j, solver in enumerate(solvers):
                 perf[:, j] = np.sort(perf[:, j])
                 x = np.repeat(perf[:, j], 2)[1:]
-                y = np.repeat(np.linspace(1 / len(self._problems), 1, len(self._problems)), 2)[:-1]
                 x = np.r_[0, x[0], x, penalty * ratio_max]
-                y = np.r_[0, 0, y, y[-1]]
+                raw_perf[:, i_col + j + 1] = x
                 plt.plot(x, y, styles[j % len(styles)], label=solvers[j], linewidth=1)
             plt.xlim(0, 1.1 * ratio_max)
             plt.ylim(0, 1.1)
@@ -146,9 +163,12 @@ class Profiles:
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
+            x = np.linspace(0, maxfev / (self._n_max + 1), maxfev)
+            x = np.repeat(x, 2)[1:]
+            raw_data[:, i_col] = x
             for j, solver in enumerate(solvers):
-                x = np.repeat(np.linspace(0, maxfev / (self._n_max + 1), maxfev), 2)[1:]
                 y = np.repeat(data[j, :], 2)[:-1]
+                raw_data[:, i_col + j + 1] = y
                 plt.plot(x, y, styles[j % len(styles)], label=solvers[j], linewidth=1)
             plt.xlim(0, 1.1 * ratio_max)
             plt.ylim(0, 1.1)
@@ -157,8 +177,23 @@ class Profiles:
             plt.legend(loc='lower right')
             pdf_data.savefig(fig, bbox_inches='tight')
             plt.close()
+
         pdf_perf.close()
         pdf_data.close()
+
+        print(f'Saving raw performance profiles.')
+        with open(csv_perf_path, 'w') as fd:
+            csv_perf = csv.writer(fd)
+            header_perf = np.array([[f'y{i}', *[f'x{i}_{s}' for s in solvers]] for i in range(1, 10)])
+            csv_perf.writerow(header_perf.flatten())
+            csv_perf.writerows(raw_perf)
+
+        print(f'Saving raw data profiles.')
+        with open(csv_data_path, 'w') as fd:
+            csv_data = csv.writer(fd)
+            header_data = np.array([[f'x{i}', *[f'y{i}_{s}' for s in solvers]] for i in range(1, 10)])
+            csv_data.writerow(header_data.flatten())
+            csv_data.writerows(raw_data)
 
     def run_solvers(self, solvers, options=None, load=True, **kwargs):
         options = self.set_default_options(options)

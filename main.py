@@ -18,6 +18,7 @@ elif sys.platform == 'darwin':
 else:
     raise NotImplementedError
 os.environ.setdefault('PYCUTEST_CACHE', 'archives')
+
 BASE_DIR = Path(__file__).resolve(strict=True).parent
 ARCH_DIR = Path(BASE_DIR, os.environ.get('PYCUTEST_CACHE'))
 ARCH_DIR.mkdir(exist_ok=True)
@@ -30,5 +31,5 @@ def validate(problem):
 
 
 if __name__ == '__main__':
-    profiles = Profiles(10, constraints='QO', callback=validate)
-    profiles(['cobyqa', 'cobyla'], load=True)
+    profiles = Profiles(50, constraints='QO', callback=validate)
+    profiles(['cobyqa', 'cobyla', 'slsqp'], load=True)
