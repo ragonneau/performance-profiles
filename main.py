@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-from pathlib import Path
 
 if sys.platform == 'linux':
     os.environ.setdefault('ARCHDEFS', '/opt/cutest/archdefs')
@@ -17,12 +16,7 @@ elif sys.platform == 'darwin':
     os.environ.setdefault('MYARCH', 'mac64.osx.gfo')
 else:
     raise NotImplementedError
-os.environ.setdefault('PYCUTEST_CACHE', 'archives')
-
-BASE_DIR = Path(__file__).resolve(strict=True).parent
-ARCH_DIR = Path(BASE_DIR, os.environ.get('PYCUTEST_CACHE'))
-ARCH_DIR.mkdir(exist_ok=True)
-from perform import Profiles  # noqa
+from perfprof import Profiles  # noqa
 
 
 def validate(problem):
@@ -31,5 +25,5 @@ def validate(problem):
 
 
 if __name__ == '__main__':
-    profiles = Profiles(50, constraints='QO', callback=validate)
-    profiles(['cobyqa', 'cobyla', 'slsqp'], load=True)
+    profiles = Profiles(10, constraints='QO', callback=validate)
+    profiles(['cobyqa', 'cobyla'], load=False)
