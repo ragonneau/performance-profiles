@@ -124,7 +124,7 @@ class Problems(list):
                         )
             else:
                 return Problem(problemName=names[i])
-        except (AttributeError, ModuleNotFoundError, RuntimeError):
+        except:
             pass
 
     def _validate(self, problem, callback=None):

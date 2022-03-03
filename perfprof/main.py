@@ -85,7 +85,9 @@ class Profiles:
         if len(self._prbs) == 0:
             raise RuntimeError
 
-        std_cycle = plt.rcParams['axes.prop_cycle']
+        std_cycle = cycler(color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+                                  '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+                                  '#bcbd22', '#17becf'])
         std_cycle += cycler(linestyle=['-', '--', ':', '-.'])
         plt.rc('axes', prop_cycle=std_cycle)
         plt.rc('figure', dpi=200)

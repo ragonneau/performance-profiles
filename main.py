@@ -25,5 +25,24 @@ def validate(problem):
 
 
 if __name__ == '__main__':
+    profiles = Profiles(10, constraints='U', callback=validate)
+    profiles(['cobyqa', 'newuoa'], load=True)
+    profiles(['cobyqa', 'bobyqa'], load=True)
+    profiles(['cobyqa', 'lincoa'], load=True)
+    profiles(['cobyqa', 'cobyla'], load=True)
+    del profiles
+
+    profiles = Profiles(10, constraints='XB', callback=validate)
+    profiles(['cobyqa', 'bobyqa'], load=True)
+    profiles(['cobyqa', 'lincoa'], load=True)
+    profiles(['cobyqa', 'cobyla'], load=True)
+    del profiles
+
+    profiles = Profiles(10, constraints='NL', callback=validate)
+    profiles(['cobyqa', 'lincoa'], load=True)
+    profiles(['cobyqa', 'cobyla'], load=True)
+    del profiles
+
     profiles = Profiles(10, constraints='QO', callback=validate)
-    profiles(['cobyqa', 'cobyla'], load=False)
+    profiles(['cobyqa', 'cobyla'], load=True)
+    del profiles
