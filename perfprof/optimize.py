@@ -63,15 +63,16 @@ class Minimizer:
         """
         self._obj_hist = []
         self._mcv_hist = []
-        if self._slv.lower() == 'cobyqa':
+        if self._slv.lower() in ['cobyqa', 'cobyqa-simple-tcg']:
+            kwargs = {'improve_tcg': self._slv.lower() == 'cobyqa'}
             res = cobyqa(self._eval, self._prb.x0, xl=self._prb.xl,
                          xu=self._prb.xu, Aub=self._prb.aub, bub=self._prb.bub,
                          Aeq=self._prb.aeq, beq=self._prb.beq,
                          cub=self._prb.cub, ceq=self._prb.ceq,
-                         options=self._opts)
+                         options=self._opts, **kwargs)
         elif self._slv.lower() == 'cobyqa-relax':
             identity = np.eye(self._prb.n)
-            aub = np.vstack([self._prb.aub, -identity, identity])
+            aub = np.vstack((self._prb.aub, -identity, identity))
             bub = np.r_[self._prb.bub, -self._prb.xl, self._prb.xu]
             res = cobyqa(self._eval, self._prb.x0, Aub=aub, bub=bub,
                          Aeq=self._prb.aeq, beq=self._prb.beq,
@@ -129,7 +130,7 @@ class Minimizer:
         if self._prb.type not in 'QO':
             valid_solvers.update({'lincoa'})
         if self._prb.type not in 'NLQO':
-            valid_solvers.update({'bobyqa', 'l-bfgs-b', 'nelder-mead', 'tnc'})
+            valid_solvers.update({'cobyqa-simple-tcg', 'bobyqa', 'l-bfgs-b', 'nelder-mead', 'tnc'})
         if self._prb.type not in 'XBNLQO':
             valid_solvers.update({'bfgs', 'cg', 'newuoa', 'uobyqa'})
         valid = self._slv.lower() in valid_solvers

@@ -204,7 +204,7 @@ class Profiles:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._eval_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_storage_path(self, problem, solver):
+    def get_storage_path(self, problem, solver, k):
         """
         Get the storage path for the computations.
 
@@ -214,6 +214,8 @@ class Profiles:
             Problem minimized during the computations.
         solver : str
             Solver used to minimize the problem.
+        k : int
+            Index of the run.
 
         Returns
         -------
@@ -230,9 +232,14 @@ class Profiles:
             sif = '_'.join(f'{k}{v}' for k, v in problem.sifParams.items())
             cache = Path(self._eval_dir, f'{problem.name}_{sif}')
         cache.mkdir(exist_ok=True)
-        obj_path = Path(cache, f'obj-hist-{solver.lower()}.npy')
-        mcv_path = Path(cache, f'mcv-hist-{solver.lower()}.npy')
-        var_path = Path(cache, f'var-hist-{solver.lower()}.npy')
+        if self._feat_opts['rerun'] == 1:
+            obj_path = Path(cache, f'obj-hist-{solver.lower()}.npy')
+            mcv_path = Path(cache, f'mcv-hist-{solver.lower()}.npy')
+            var_path = Path(cache, f'var-hist-{solver.lower()}.npy')
+        else:
+            obj_path = Path(cache, f'obj-hist-{solver.lower()}-{k}.npy')
+            mcv_path = Path(cache, f'mcv-hist-{solver.lower()}-{k}.npy')
+            var_path = Path(cache, f'var-hist-{solver.lower()}-{k}.npy')
         return obj_path, mcv_path, var_path
 
     def get_perf_path(self, slvs):
@@ -250,11 +257,14 @@ class Profiles:
             Path to the PDF format of the performance profiles.
         pathlib.Path
             Path to the CSV format of the performance profiles.
+        pathlib.Path
+            Path to the TXT format of the performance profiles.
         """
         slvs = '_'.join(sorted(slvs))
         pdf_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.pdf')
         csv_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.csv')
-        return pdf_path, csv_path
+        txt_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.txt')
+        return pdf_path, csv_path, txt_path
 
     def get_data_path(self, slvs):
         """
@@ -271,11 +281,14 @@ class Profiles:
             Path to the PDF format of the data profiles.
         pathlib.Path
             Path to the CSV format of the data profiles.
+        pathlib.Path
+            Path to the TXT format of the data profiles.
         """
         slvs = '_'.join(sorted(map(str.lower, slvs)))
         pdf_path = Path(self._data_dir, f'data-{slvs}-{self._ctrs}.pdf')
         csv_path = Path(self._data_dir, f'data-{slvs}-{self._ctrs}.csv')
-        return pdf_path, csv_path
+        txt_path = Path(self._data_dir, f'data-{slvs}-{self._ctrs}.txt')
+        return pdf_path, csv_path, txt_path
 
     def profiles(self, solvers, options=None, load=True, **kwargs):
         """
@@ -310,21 +323,21 @@ class Profiles:
         rerun = merits.shape[-2]
         maxfev = merits.shape[-1]
 
-        f0 = merits[..., 0]
-        sols = np.nanmin(merits, axis=(1, 2, 3))
+        f0 = np.nanmin(merits[..., 0], 1, initial=np.inf)
+        fmin = np.nanmin(merits, (1, 2, 3), initial=np.inf)
         if self._feat in ['signif', 'noisy']:
             rerun_sav = self._feat_opts['rerun']
             feat_sav = self._feat
             self._feat_opts['rerun'] = 1
             self._feat = 'plain'
             merits_plain = self.run_solvers(solvers, opts, load, **kwargs)
-            sols_plain = np.nanmin(merits_plain, axis=(1, 2, 3))
-            sols = np.minimum(sols, sols_plain)
+            fmin_plain = np.nanmin(merits_plain, (1, 2, 3))
+            fmin = np.minimum(fmin, fmin_plain)
             self._feat_opts['rerun'] = rerun_sav
             self._feat = feat_sav
 
-        pdf_perf_path, csv_perf_path = self.get_perf_path(solvers)
-        pdf_data_path, csv_data_path = self.get_data_path(solvers)
+        pdf_perf_path, csv_perf_path, txt_perf_path = self.get_perf_path(solvers)
+        pdf_data_path, csv_data_path, txt_data_path = self.get_data_path(solvers)
         raw_col = (prec_max - prec_min + 1) * (len(solvers) + 1)
         raw_perf = np.empty((2 * len(self._prbs) + 2, raw_col), dtype=float)
         raw_data = np.empty((2 * maxfev - 1, raw_col), dtype=float)
@@ -335,15 +348,19 @@ class Profiles:
             print(f'Creating plots with tau = 1e-{prec}.')
             tau = 10 ** (-prec)
 
-            work = np.full_like(f0, np.nan)
+            work = np.full((len(self._prbs), len(solvers), rerun), np.nan)
             for i in range(len(self._prbs)):
                 for j in range(len(solvers)):
                     for k in range(rerun):
-                        rho = tau * f0[i, j, k] + (1.0 - tau) * sols[i]
+                        if np.isfinite(fmin[i]):
+                            rho = tau * f0[i, k] + (1.0 - tau) * fmin[i]
+                            rho = max(rho, fmin[i])
+                        else:
+                            rho = -np.inf
                         if np.nanmin(merits[i, j, k, :], initial=np.inf) <= rho:
                             index = np.argmax(merits[i, j, k, :] <= rho)
                             work[i, j, k] = index + 1
-            work = np.mean(work, axis=-1)
+            work = np.mean(work, -1)
 
             perf = np.full((len(self._prbs), len(solvers)), np.nan, dtype=float)
             for i in range(len(self._prbs)):
@@ -352,11 +369,12 @@ class Profiles:
             perf = np.log2(perf)
             ratio_max = np.nanmax(perf, initial=ratio_max)
             perf[np.isnan(perf)] = penalty * ratio_max
+            perf = np.sort(perf, 0)
 
             data = np.full((len(solvers), maxfev), np.nan, dtype=float)
             for j in range(len(solvers)):
                 for k in range(maxfev):
-                    data[j, k] = np.count_nonzero(work[:, j] <= k)
+                    data[j, k] = np.count_nonzero(work[:, j] <= k + 1)
             data /= len(self._prbs)
 
             fig = plt.figure()
@@ -372,13 +390,12 @@ class Profiles:
             i_col = (prec - 1) * (len(solvers) + 1)
             raw_perf[:, i_col] = y
             for j, solver in enumerate(solvers):
-                perf[:, j] = np.sort(perf[:, j])
                 x = np.repeat(perf[:, j], 2)[1:]
                 x = np.r_[0, x[0], x, penalty * ratio_max]
                 raw_perf[:, i_col + j + 1] = x
                 plt.plot(x, y, label=solvers[j])
             plt.xlim(0, 1.1 * ratio_max)
-            plt.ylim(0, 1.1)
+            plt.ylim(0, 1)
             plt.xlabel(r'$\log_2(\mathrm{NF}/\mathrm{NF}_{\min})$')
             plt.ylabel(fr'Performance profile ($\tau=10^{{-{prec}}}$)')
             plt.legend(loc='lower right')
@@ -399,7 +416,7 @@ class Profiles:
                 raw_data[:, i_col + j + 1] = y
                 plt.plot(x, y, label=solvers[j])
             plt.xlim(0, 1.1 * ratio_max)
-            plt.ylim(0, 1.1)
+            plt.ylim(0, 1)
             plt.xlabel(r'$\mathrm{NF}/(n+1)$')
             plt.ylabel(fr'Data profile ($\tau=10^{{-{prec}}}$)')
             plt.legend(loc='lower right')
@@ -408,9 +425,13 @@ class Profiles:
 
         print('Saving performance profiles.')
         pdf_perf.close()
+        with open(txt_perf_path, 'w') as fd:
+            fd.write('\n'.join(p.name for p in self._prbs))
 
         print('Saving data profiles.')
         pdf_data.close()
+        with open(txt_data_path, 'w') as fd:
+            fd.write('\n'.join(p.name for p in self._prbs))
 
         print('Saving raw performance profiles.')
         with open(csv_perf_path, 'w') as fd:
@@ -509,20 +530,19 @@ class Profiles:
         penalty : float, optional
             Penalty coefficient of the merit function
         """
-        obj_path, mcv_path, var_path = self.get_storage_path(problem, solver)
+        obj_path, mcv_path, var_path = self.get_storage_path(problem, solver, k)
         maxfev = options.get('maxfev')
-        huge = np.finfo(float).max
         merits, nfev = None, 0
         if load and obj_path.is_file() and mcv_path.is_file() and \
                 var_path.is_file():
             obj_hist = np.load(obj_path)  # noqa
             mcv_hist = np.load(mcv_path)  # noqa
-            merits = self._merit(obj_hist, mcv_hist, huge, **kwargs)
+            merits = self._merit(obj_hist, mcv_hist, **kwargs)
             nfev = merits.size
             if maxfev > nfev:
                 var = np.load(var_path)  # noqa
-                if var[0] == 0:
-                    remain = np.full(maxfev - nfev, huge, dtype=float)
+                if var[0]:
+                    remain = np.full(maxfev - nfev, np.nan, dtype=float)
                     merits = np.r_[merits, remain]
                 else:
                     merits, nfev = None, 0
@@ -535,18 +555,21 @@ class Profiles:
                 opt = Minimizer(problem, solver, options, self._noise, k=k)
                 res, obj_hist, mcv_hist = opt()
             nfev = min(obj_hist.size, maxfev)
-            merits = np.full(maxfev, huge)
-            merits[:nfev] = self._merit(obj_hist[:nfev], mcv_hist[:nfev], huge,
+            merits = np.full(maxfev, np.nan)
+            merits[:nfev] = self._merit(obj_hist[:nfev], mcv_hist[:nfev],
                                         **kwargs)
             np.save(obj_path, obj_hist[:nfev])  # noqa
             np.save(mcv_path, mcv_hist[:nfev])  # noqa
-            np.save(var_path, np.array([res.status]))  # noqa
-        i = np.argmin(merits[:nfev])
+            np.save(var_path, np.array([res.success]))  # noqa
+        if not np.all(np.isnan(merits[:nfev])):
+            i = np.nanargmin(merits[:nfev])
+        else:
+            i = np.nanargmin(mcv_hist[:nfev])
         self._print(problem.name, solver, obj_hist[i], mcv_hist[i], nfev)
         return merits, nfev
 
     @staticmethod
-    def _merit(obj_hist, mcv_hist, huge, **kwargs):
+    def _merit(obj_hist, mcv_hist, **kwargs):
         """
         Evaluate the merit function for comparing the solvers.
 
@@ -556,8 +579,6 @@ class Profiles:
             Objective function values encountered by the optimization method.
         mcv_hist : numpy.ndarray, shape (m,)
             Constraint violations encountered by the optimization method.
-        huge : float
-            Largest value considered for the comparison.
 
         Returns
         -------
@@ -578,11 +599,10 @@ class Profiles:
             if mcv_hist[i] <= kwargs.get('low_cv', 1e-12):
                 merits[i] = obj_hist[i]
             elif mcv_hist[i] >= kwargs.get('high_cv', 1e-2):
-                merits[i] = huge
+                merits[i] = np.nan
             else:
                 penalty = kwargs.get('penalty', 1e3)
                 merits[i] = obj_hist[i] + penalty * mcv_hist[i]
-            merits[i] = np.nan_to_num(merits[i], nan=huge)
         return merits
 
     def _noise(self, x, fx, k=0):

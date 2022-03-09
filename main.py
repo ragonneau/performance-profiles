@@ -26,23 +26,23 @@ def validate(problem):
 
 if __name__ == '__main__':
     profiles = Profiles(10, constraints='U', callback=validate)
-    profiles(['cobyqa', 'newuoa'], load=True)
-    profiles(['cobyqa', 'bobyqa'], load=True)
-    profiles(['cobyqa', 'lincoa'], load=True)
-    profiles(['cobyqa', 'cobyla'], load=True)
+    profiles(['cobyqa', 'newuoa'], load=False)
+    profiles(['cobyqa', 'bobyqa'], load=False)
+    profiles(['cobyqa', 'lincoa'], load=False)
+    profiles(['cobyqa', 'cobyla'], load=False)
     del profiles
 
-    profiles = Profiles(10, constraints='XB', callback=validate)
-    profiles(['cobyqa', 'bobyqa'], load=True)
-    profiles(['cobyqa', 'lincoa'], load=True)
-    profiles(['cobyqa', 'cobyla'], load=True)
+    profiles = Profiles(10, constraints='B', callback=validate)
+    profiles(['cobyqa', 'bobyqa'], load=False)
+    profiles(['cobyqa', 'lincoa'], load=False)
+    profiles(['cobyqa', 'cobyla'], load=False)
     del profiles
 
     profiles = Profiles(10, constraints='NL', callback=validate)
-    profiles(['cobyqa', 'lincoa'], load=True)
-    profiles(['cobyqa', 'cobyla'], load=True)
+    profiles(['cobyqa', 'lincoa'], load=False)
+    profiles(['cobyqa', 'cobyla'], load=False)
     del profiles
 
     profiles = Profiles(10, constraints='QO', callback=validate)
-    profiles(['cobyqa', 'cobyla'], load=True)
+    profiles(['cobyqa', 'cobyla'], load=False)
     del profiles
