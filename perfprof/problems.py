@@ -25,8 +25,20 @@ EXCLUDED = {
     # The starting points contain NaN values.
     'LHAIFAM',
 
-    # The problems are infeasible.
+    # The problems contain a lot of NaN.
+    'HS62', 'HS112', 'LIN',
+
+    # The problems seem not lower-bounded.
+    'INDEF',
+
+    # The problems are known infeasible.
     'ARGLALE', 'ARGLBLE', 'ARGLCLE', 'MODEL', 'NASH',
+
+    # The problems seem infeasible.
+    'CRESC4', 'CRESC50', 'DIXCHLNG', 'DUALC1', 'DUALC2', 'DUALC5', 'DUALC8',
+    'ELATTAR', 'HS8', 'HS13', 'HS19', 'HS63', 'HS64', 'HS72', 'HS73', 'HS84',
+    'HS86', 'HS88', 'HS89', 'HS92', 'HS101', 'HS102', 'HS103', 'HS106', 'HS107',
+    'HS109', 'LSNNODOC', 'SNAKE', 'SUPERSIM', 'TAME', 'WACHBIEG',
 
     # The projection of the initial guess fails.
     'LINCONT',
@@ -111,10 +123,10 @@ class Problems(list):
         Problem
             Loaded problem. The return is set to None if the loading failed.
         """
-        try:
-            print(f'Loading {names[i]} ({i + 1}/{len(names)}).')
-            if pycutest.problem_properties(names[i])['n'] is None:
-                if names[i] not in EXCLUDED:
+        if names[i] not in EXCLUDED:
+            try:
+                print(f'Loading {names[i]} ({i + 1}/{len(names)}).')
+                if pycutest.problem_properties(names[i])['n'] is None:
                     sif = self._sif_decode(names[i])
                     mask = (sif >= self._n_min) & (sif <= self._n_max)
                     if np.any(mask):
@@ -122,10 +134,10 @@ class Problems(list):
                             problemName=names[i],
                             sifParams={'N': np.max(sif[mask])},
                         )
-            else:
-                return Problem(problemName=names[i])
-        except:
-            pass
+                else:
+                    return Problem(problemName=names[i])
+            except:
+                pass
 
     def _validate(self, problem, callback=None):
         """

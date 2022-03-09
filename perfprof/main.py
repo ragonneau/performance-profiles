@@ -323,7 +323,13 @@ class Profiles:
         rerun = merits.shape[-2]
         maxfev = merits.shape[-1]
 
-        f0 = np.nanmin(merits[..., 0], 1, initial=np.inf)
+        f0 = np.empty((len(self._prbs), rerun), dtype=float)
+        for i in range(len(self._prbs)):
+            for k in range(rerun):
+                if np.all(np.isnan(merits[i, :, k, 0])):
+                    f0[i, k] = np.inf
+                else:
+                    f0[i, k] = np.nanmax(merits[i, :, k, 0])
         fmin = np.nanmin(merits, (1, 2, 3), initial=np.inf)
         if self._feat in ['signif', 'noisy']:
             rerun_sav = self._feat_opts['rerun']
