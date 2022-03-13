@@ -24,7 +24,7 @@ jobs:
         uses: actions/setup-python@v3
 
       - name: Install CUTEst
-        uses: ragonneau/cutest-action@v1.0.0
+        uses: ragonneau/cutest-action@v1.0.1
 
       - name: Install dependencies
         run: |
