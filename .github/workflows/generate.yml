@@ -28,7 +28,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt install texlive-full
+          sudo apt-get update
+          sudo apt-get install texlive-full --fix-missing
           python -m pip install -r requirements.txt
           git clone https://github.com/ragonneau/cobyqa.git
           cd cobyqa
