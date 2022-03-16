@@ -8,6 +8,7 @@ if [[ "$RUNNER_OS" == "Linux" ]]; then
     sudo apt-get install texlive-full --fix-missing
 elif [[ "$RUNNER_OS" == "macOS" ]]; then
     brew install --cask mactex
+    eval "$(/usr/libexec/path_helper)"
 else
     echo "Windows platform is not supported."
     exit 1
