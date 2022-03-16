@@ -1,4 +1,5 @@
 import csv
+import glob
 import os
 import re
 import warnings
@@ -71,6 +72,7 @@ class Profiles:
         self._n_max = n_max
         self._feat = feature.lower()
         self._ctrs = constraints.upper()
+        self._callback = callback
 
         n_string = f'{self._n_min}-{self._n_max}'
         self._perf_dir = Path(ARCH_DIR, 'performance', self._feat, n_string)
@@ -78,7 +80,7 @@ class Profiles:
         self._eval_dir = Path(ARCH_DIR, 'storage', self._feat)
 
         self._feat_opts = self.get_feature_options(**kwargs)
-        self._prbs = Problems(self._n_min, self._n_max, self._ctrs, callback)
+        self._prbs = Problems(self._n_min, self._n_max, self._ctrs, self._validate)
         print()
         print(f'*** {len(self._prbs)} problem(s) loaded ***')
         print()
@@ -210,7 +212,7 @@ class Profiles:
 
         Parameters
         ----------
-        problem : perfprof.Problem
+        problem : Problem
             Problem minimized during the computations.
         solver : str
             Solver used to minimize the problem.
@@ -248,7 +250,7 @@ class Profiles:
 
         Parameters
         ----------
-        slvs : list
+        slvs : {list, str}
             Solvers to use to solve each CUTEst problem.
 
         Returns
@@ -260,7 +262,8 @@ class Profiles:
         pathlib.Path
             Path to the TXT format of the performance profiles.
         """
-        slvs = '_'.join(sorted(slvs))
+        if not isinstance(slvs, str):
+            slvs = '_'.join(sorted(slvs))
         pdf_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.pdf')
         csv_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.csv')
         txt_path = Path(self._perf_dir, f'perf-{slvs}-{self._ctrs}.txt')
@@ -324,20 +327,19 @@ class Profiles:
         maxfev = merits.shape[-1]
 
         f0 = np.empty((len(self._prbs), rerun), dtype=float)
-        for i in range(len(self._prbs)):
+        for i, p in enumerate(self._prbs):
             for k in range(rerun):
-                if np.all(np.isnan(merits[i, :, k, 0])):
-                    f0[i, k] = np.inf
-                else:
-                    f0[i, k] = np.nanmax(merits[i, :, k, 0])
-        fmin = np.nanmin(merits, (1, 2, 3), initial=np.inf)
+                obj = p.fun(p.x0, self._noise, k)
+                mcv = p.maxcv(p.x0)
+                f0[i, k] = self._merit(obj, mcv, barrier=False, **kwargs)
+        fmin = np.min(merits, (1, 2, 3))
         if self._feat in ['signif', 'noisy']:
             rerun_sav = self._feat_opts['rerun']
             feat_sav = self._feat
             self._feat_opts['rerun'] = 1
             self._feat = 'plain'
             merits_plain = self.run_solvers(solvers, opts, load, **kwargs)
-            fmin_plain = np.nanmin(merits_plain, (1, 2, 3))
+            fmin_plain = np.min(merits_plain, (1, 2, 3))
             fmin = np.minimum(fmin, fmin_plain)
             self._feat_opts['rerun'] = rerun_sav
             self._feat = feat_sav
@@ -363,7 +365,7 @@ class Profiles:
                             rho = max(rho, fmin[i])
                         else:
                             rho = -np.inf
-                        if np.nanmin(merits[i, j, k, :], initial=np.inf) <= rho:
+                        if np.min(merits[i, j, k, :]) <= rho:
                             index = np.argmax(merits[i, j, k, :] <= rho)
                             work[i, j, k] = index + 1
             work = np.mean(work, -1)
@@ -372,12 +374,12 @@ class Profiles:
             for i in range(len(self._prbs)):
                 if not np.all(np.isnan(work[i, :])):
                     perf[i, :] = work[i, :] / np.nanmin(work[i, :])
-            perf = np.log2(perf)
+            perf = np.maximum(np.log2(perf), 0.0)
             ratio_max = np.nanmax(perf, initial=ratio_max)
             perf[np.isnan(perf)] = penalty * ratio_max
             perf = np.sort(perf, 0)
 
-            data = np.full((len(solvers), maxfev), np.nan, dtype=float)
+            data = np.empty((len(solvers), maxfev), dtype=float)
             for j in range(len(solvers)):
                 for k in range(maxfev):
                     data[j, k] = np.count_nonzero(work[:, j] <= k + 1)
@@ -509,7 +511,7 @@ class Profiles:
 
         Parameters
         ----------
-        problem : perfprof.Problem
+        problem : Problem
             Problem to be solved.
         solver : str
             Solver to employ to solve the problem.
@@ -548,7 +550,7 @@ class Profiles:
             if maxfev > nfev:
                 var = np.load(var_path)  # noqa
                 if var[0]:
-                    remain = np.full(maxfev - nfev, np.nan, dtype=float)
+                    remain = np.full(maxfev - nfev, np.inf, dtype=float)
                     merits = np.r_[merits, remain]
                 else:
                     merits, nfev = None, 0
@@ -561,18 +563,45 @@ class Profiles:
                 opt = Minimizer(problem, solver, options, self._noise, k=k)
                 res, obj_hist, mcv_hist = opt()
             nfev = min(obj_hist.size, maxfev)
-            merits = np.full(maxfev, np.nan)
-            merits[:nfev] = self._merit(obj_hist[:nfev], mcv_hist[:nfev],
-                                        **kwargs)
+            merits = np.full(maxfev, np.inf)
+            merits[:nfev] = self._merit(obj_hist[:nfev], mcv_hist[:nfev], **kwargs)
             np.save(obj_path, obj_hist[:nfev])  # noqa
             np.save(mcv_path, mcv_hist[:nfev])  # noqa
             np.save(var_path, np.array([res.success]))  # noqa
-        if not np.all(np.isnan(merits[:nfev])):
-            i = np.nanargmin(merits[:nfev])
-        else:
-            i = np.nanargmin(mcv_hist[:nfev])
+        i = np.argmin(merits[:nfev])
         self._print(problem.name, solver, obj_hist[i], mcv_hist[i], nfev)
         return merits, nfev
+
+    def _validate(self, problem):
+        """
+        Validate the given problem.
+
+        The method ensure that the problem is included in the admissible ones,
+        and that the user's callback function is satisfied.
+
+        Parameters
+        ----------
+        problem : Problem
+            Problem to be minimized by the solver.
+
+        Returns
+        -------
+        bool
+            Whether the given problem is valid.
+        """
+        _, _, txt_pattern = self.get_perf_path('*')
+        txt_paths = glob.glob(str(txt_pattern))
+        accepted = []
+        for txt_path in txt_paths:
+            with open(txt_path, 'r') as fd:
+                accepted.extend(fd.read().splitlines())
+        if len(accepted) == 0:
+            valid = True
+        else:
+            valid = problem.name in set(accepted)
+        if self._callback is not None:
+            valid = valid and self._callback(problem)
+        return valid
 
     @staticmethod
     def _merit(obj_hist, mcv_hist, **kwargs):
@@ -598,16 +627,20 @@ class Profiles:
         high_cv : float, optional
             Value of the constraint violation considered to be high.
         penalty : float, optional
-            Penalty coefficient of the merit function
+            Penalty coefficient of the merit function.
+        barrier : bool, optional
+            Whether to apply a a barrier at `high_cv`.
         """
+        obj_hist = np.atleast_1d(obj_hist)
+        mcv_hist = np.atleast_1d(mcv_hist)
         merits = np.empty_like(obj_hist)
         for i in range(merits.size):
             if mcv_hist[i] <= kwargs.get('low_cv', 1e-12):
                 merits[i] = obj_hist[i]
-            elif mcv_hist[i] >= kwargs.get('high_cv', 1e-2):
-                merits[i] = np.nan
+            elif kwargs.get('barrier', False) and mcv_hist[i] >= kwargs.get('high_cv', 1e-6):
+                merits[i] = np.inf
             else:
-                penalty = kwargs.get('penalty', 1e3)
+                penalty = kwargs.get('penalty', 1e8)
                 merits[i] = obj_hist[i] + penalty * mcv_hist[i]
         return merits
 

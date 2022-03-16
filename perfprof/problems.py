@@ -35,10 +35,13 @@ EXCLUDED = {
     'ARGLALE', 'ARGLBLE', 'ARGLCLE', 'MODEL', 'NASH',
 
     # The problems seem infeasible.
-    'CRESC4', 'CRESC50', 'DIXCHLNG', 'DUALC1', 'DUALC2', 'DUALC5', 'DUALC8',
-    'ELATTAR', 'HS8', 'HS13', 'HS19', 'HS63', 'HS64', 'HS72', 'HS73', 'HS84',
-    'HS86', 'HS88', 'HS89', 'HS92', 'HS101', 'HS102', 'HS103', 'HS106', 'HS107',
-    'HS109', 'LSNNODOC', 'SNAKE', 'SUPERSIM', 'TAME', 'WACHBIEG',
+    'ANTWERP', 'CRESC4', 'CRESC50', 'DEGENLPA', 'DEGENLPB', 'DIXCHLNG',
+    'DUALC1', 'DUALC2', 'DUALC5', 'DUALC8', 'ELATTAR', 'GOULDQP1', 'HIMMELBJ',
+    'HONG', 'HS8', 'HS13', 'HS19', 'HS55', 'HS63', 'HS64', 'HS72', 'HS73',
+    'HS84', 'HS86', 'HS88', 'HS89', 'HS92', 'HS101', 'HS102', 'HS103', 'HS106',
+    'HS107', 'HS109', 'HS119', 'LOADBAL', 'LOTSCHD', 'LSNNODOC', 'PORTFL1',
+    'PORTFL2', 'PORTFL3', 'PORTFL4', 'PORTFL6', 'SNAKE', 'SUPERSIM', 'TAME',
+    'WACHBIEG',
 
     # The projection of the initial guess fails.
     'LINCONT',
@@ -96,7 +99,7 @@ class Problems(list):
 
         Parameters
         ----------
-        problem : perfprof.Problem
+        problem : Problem
             Problem to be appended to the current structure.
         callback : callable, optional
             Extra tests to perform on the problem.
@@ -145,7 +148,7 @@ class Problems(list):
 
         Parameters
         ----------
-        problem : perfprof.Problem
+        problem : Problem
             Problem to validate.
         callback : callable, optional
             Extra tests to perform on the problem.
@@ -687,7 +690,7 @@ class Problem:
             self.x0 = np.minimum(self.xu, np.maximum(self.xl, self.x0))
         elif self.mlub == 0 and self.mleq > 0 and \
                 np.all(self.xl == -np.inf) and np.all(self.xu == np.inf):
-            self.x0 = lstsq(self.aeq, self.beq - np.dot(self.aeq, self.x0))[0]
+            self.x0 += lstsq(self.aeq, self.beq - np.dot(self.aeq, self.x0))[0]
         else:
             bnds = Bounds(self.xl, self.xu, True)
             ctrs = []

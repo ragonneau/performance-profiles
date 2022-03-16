@@ -16,7 +16,7 @@ class Minimizer:
 
         Parameters
         ----------
-        problem : perfprof.Problem
+        problem : Problem
             Problem to be minimized by the solver.
         solver : str
             Solver to employ to minimize the problem.

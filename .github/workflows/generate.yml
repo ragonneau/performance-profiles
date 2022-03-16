@@ -14,7 +14,7 @@ on:
 jobs:
   generate:
     name: Generate performance profiles
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -22,6 +22,8 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v3
+        with:
+          python-version: '3.x'
 
       - name: Install CUTEst
         uses: ragonneau/cutest-action@v1.0.1

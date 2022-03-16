@@ -2,6 +2,14 @@
 import os
 import sys
 
+import numpy as np
+
+np.set_printoptions(
+    precision=4,
+    linewidth=sys.maxsize,
+    sign=' ',
+)
+
 if sys.platform == 'linux':
     os.environ.setdefault('ARCHDEFS', '/opt/cutest/archdefs')
     os.environ.setdefault('SIFDECODE', '/opt/cutest/sifdecode')
