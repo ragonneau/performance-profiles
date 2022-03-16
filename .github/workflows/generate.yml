@@ -29,17 +29,10 @@ jobs:
         uses: ragonneau/cutest-action@v1.0.1
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install texlive-full --fix-missing
-          python -m pip install -r requirements.txt
-          git clone https://github.com/ragonneau/cobyqa.git
-          cd cobyqa
-          python -m pip install .
-          cd ..
-          python main.py
-          rm -rf
-          find archives -type f -name *.csv -exec rm -rf {} \;
+        run: bash build_tools/github/install_deps.sh
+
+      - name: Generate performance profiles
+        run: bash build_tools/github/run_profiles.sh
 
       - name: Store artifacts
         uses: actions/upload-artifact@v2
