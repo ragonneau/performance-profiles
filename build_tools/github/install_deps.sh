@@ -11,6 +11,8 @@ if [[ "$RUNNER_OS" == "Linux" ]]; then
 elif [[ "$RUNNER_OS" == "macOS" ]]; then
     brew install --cask mactex
     eval "$(/usr/libexec/path_helper)"
+    echo "$PATH" > "$GITHUB_PATH"
+    echo "MANPATH=$MANPATH" >> "$GITHUB_ENV"
 else
     echo "Windows platform is not supported."
     exit 1
