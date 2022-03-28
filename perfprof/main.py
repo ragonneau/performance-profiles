@@ -379,10 +379,13 @@ class Profiles:
             perf[np.isnan(perf)] = penalty * ratio_max
             perf = np.sort(perf, 0)
 
-            data = np.empty((len(solvers), maxfev), dtype=float)
+            ndata = int(np.ceil(maxfev / self._n_min))
+            data = np.empty((len(solvers), ndata), dtype=float)
+            sz = np.array([p.n for p in self._prbs])
+            data_xlim = 1.1 * np.nanmax(work / (sz[:, np.newaxis] + 1))
             for j in range(len(solvers)):
-                for k in range(maxfev):
-                    data[j, k] = np.count_nonzero(work[:, j] <= k + 1)
+                for k in range(ndata):
+                    data[j, k] = np.count_nonzero(work[:, j] <= k * (sz + 1))
             data /= len(self._prbs)
 
             fig = plt.figure()
@@ -416,16 +419,16 @@ class Profiles:
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
-            x = np.linspace(0, maxfev / (self._n_max + 1), maxfev)
+            x = np.arange(ndata)
             x = np.repeat(x, 2)[1:]
             raw_data[:, i_col] = x
             for j, solver in enumerate(solvers):
                 y = np.repeat(data[j, :], 2)[:-1]
                 raw_data[:, i_col + j + 1] = y
                 plt.plot(x, y, label=solvers[j])
-            plt.xlim(0, 1.1 * ratio_max)
+            plt.xlim(0, data_xlim)
             plt.ylim(0, 1)
-            plt.xlabel(r'$\mathrm{NF}/(n+1)$')
+            plt.xlabel(r'Number of simplex gradients')
             plt.ylabel(fr'Data profile ($\tau=10^{{-{prec}}}$)')
             plt.legend(loc='lower right')
             pdf_data.savefig(fig, bbox_inches='tight')
@@ -572,7 +575,7 @@ class Profiles:
         self._print(problem.name, solver, obj_hist[i], mcv_hist[i], nfev)
         return merits, nfev
 
-    def _validate(self, problem):
+    def _validate(self, problem, only_existing=True):
         """
         Validate the given problem.
 
@@ -595,7 +598,7 @@ class Profiles:
         for txt_path in txt_paths:
             with open(txt_path, 'r') as fd:
                 accepted.extend(fd.read().splitlines())
-        if len(accepted) == 0:
+        if len(txt_paths) == 0:
             valid = True
         else:
             valid = problem.name in set(accepted)

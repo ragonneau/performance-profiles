@@ -24,6 +24,7 @@ elif sys.platform == 'darwin':
     os.environ.setdefault('MYARCH', 'mac64.osx.gfo')
 else:
     raise NotImplementedError
+sys.path.append(f'{os.environ["HOME"]}/PycharmProjects/cobyqa')
 from perfprof import Profiles  # noqa
 
 
