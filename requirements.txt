@@ -1,7 +1,7 @@
 # cobyqa
 cycler==0.11.0
 joblib==1.1.0
-matplotlib==3.5.1
+matplotlib==3.5.2
 numpy==1.22.3
 pdfo==1.2
 pycutest==1.2
