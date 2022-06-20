@@ -474,11 +474,14 @@ class Problem:
         -------
         float
             Objective function value at `x`.
+        float, optional
+            Modified objective function value at `x`. It is returned if
+            `callback` is defined.
         """
         x = np.asarray(x, dtype=float)
         fx = self.obj(x)
         if callback is not None:
-            fx = callback(x, fx, *args, **kwargs)
+            return fx, callback(x, fx, *args, **kwargs)
         return fx
 
     def hess(self, x):

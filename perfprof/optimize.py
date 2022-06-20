@@ -151,6 +151,10 @@ class Minimizer:
             Objective function value at `x`.
         """
         fx = self._prb.fun(x, self._callback, *self._args, **self._kwargs)
-        self._obj_hist.append(fx)
+        if hasattr(fx, '__len__') and len(fx) == 2:
+            self._obj_hist.append(fx[0])
+            fx = fx[1]
+        else:
+            self._obj_hist.append(fx)
         self._mcv_hist.append(self._prb.maxcv(x))
         return fx

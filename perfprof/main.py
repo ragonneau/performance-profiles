@@ -15,7 +15,7 @@ from matplotlib.ticker import MultipleLocator
 
 from .optimize import Minimizer
 
-os.environ.setdefault('PYCUTEST_CACHE', 'archives')
+os.environ.setdefault('PYCUTEST_CACHE', '.')
 BASE_DIR = Path.cwd()
 ARCH_DIR = Path(BASE_DIR, 'archives')
 ARCH_DIR.mkdir(exist_ok=True)
@@ -74,12 +74,18 @@ class Profiles:
         self._ctrs = constraints.upper()
         self._callback = callback
 
-        n_string = f'{self._n_min}-{self._n_max}'
-        self._perf_dir = Path(ARCH_DIR, 'performance', self._feat, n_string)
-        self._data_dir = Path(ARCH_DIR, 'data', self._feat, n_string)
-        self._eval_dir = Path(ARCH_DIR, 'storage', self._feat)
-
         self._feat_opts = self.get_feature_options(**kwargs)
+        n_str = f'{self._n_min}-{self._n_max}'
+        feat_str = '_'.join(f'{k}-{v}' for k, v in self._feat_opts.items())
+        if self._feat != 'plain':
+            self._perf_dir = Path(ARCH_DIR, 'performance', self._feat, n_str, feat_str)
+            self._data_dir = Path(ARCH_DIR, 'data', self._feat, n_str, feat_str)
+            self._eval_dir = Path(ARCH_DIR, 'storage', self._feat, feat_str)
+        else:
+            self._perf_dir = Path(ARCH_DIR, 'performance', self._feat, n_str)
+            self._data_dir = Path(ARCH_DIR, 'data', self._feat, n_str)
+            self._eval_dir = Path(ARCH_DIR, 'storage', self._feat)
+
         self._prbs = Problems(self._n_min, self._n_max, self._ctrs, self._validate)
         print()
         print(f'*** {len(self._prbs)} problem(s) loaded ***')
@@ -324,12 +330,13 @@ class Profiles:
         penalty = 2
         ratio_max = 1e-6
         rerun = merits.shape[-2]
-        maxfev = merits.shape[-1]
 
         f0 = np.empty((len(self._prbs), rerun), dtype=float)
         for i, p in enumerate(self._prbs):
             for k in range(rerun):
                 obj = p.fun(p.x0, self._noise, k)
+                if hasattr(obj, '__len__') and len(obj) == 2:
+                    obj = obj[0]
                 mcv = p.maxcv(p.x0)
                 f0[i, k] = self._merit(obj, mcv, barrier=False, **kwargs)
         fmin = np.min(merits, (1, 2, 3))
@@ -348,7 +355,7 @@ class Profiles:
         pdf_data_path, csv_data_path, txt_data_path = self.get_data_path(solvers)
         raw_col = (prec_max - prec_min + 1) * (len(solvers) + 1)
         raw_perf = np.empty((2 * len(self._prbs) + 2, raw_col), dtype=float)
-        raw_data = np.empty((2 * maxfev - 1, raw_col), dtype=float)
+        raw_data = np.empty((2 * len(self._prbs) + 2, raw_col), dtype=float)
         pdf_perf = backend_pdf.PdfPages(pdf_perf_path)
         pdf_data = backend_pdf.PdfPages(pdf_data_path)
         print()
@@ -375,18 +382,17 @@ class Profiles:
                 if not np.all(np.isnan(work[i, :])):
                     perf[i, :] = work[i, :] / np.nanmin(work[i, :])
             perf = np.maximum(np.log2(perf), 0.0)
-            ratio_max = np.nanmax(perf, initial=ratio_max)
-            perf[np.isnan(perf)] = penalty * ratio_max
+            perf_ratio_max = np.nanmax(perf, initial=ratio_max)
+            perf[np.isnan(perf)] = penalty * perf_ratio_max
             perf = np.sort(perf, 0)
 
-            ndata = int(np.ceil(maxfev / self._n_min))
-            data = np.empty((len(solvers), ndata), dtype=float)
-            sz = np.array([p.n for p in self._prbs])
-            data_xlim = 1.1 * np.nanmax(work / (sz[:, np.newaxis] + 1))
-            for j in range(len(solvers)):
-                for k in range(ndata):
-                    data[j, k] = np.count_nonzero(work[:, j] <= k * (sz + 1))
-            data /= len(self._prbs)
+            data = np.full((len(self._prbs), len(solvers)), np.nan, dtype=float)
+            for i, p in enumerate(self._prbs):
+                if not np.all(np.isnan(work[i, :])):
+                    data[i, :] = work[i, :] / (p.n + 1)
+            data_ratio_max = np.nanmax(data, initial=ratio_max)
+            data[np.isnan(data)] = penalty * data_ratio_max
+            data = np.sort(data, 0)
 
             fig = plt.figure()
             ax = fig.add_subplot(111)
@@ -395,17 +401,17 @@ class Profiles:
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
-            y = np.linspace(1 / len(self._prbs), 1, len(self._prbs))
+            y = np.linspace(1 / len(self._prbs), 1.0, len(self._prbs))
             y = np.repeat(y, 2)[:-1]
             y = np.r_[0, 0, y, y[-1]]
             i_col = (prec - 1) * (len(solvers) + 1)
             raw_perf[:, i_col] = y
             for j, solver in enumerate(solvers):
                 x = np.repeat(perf[:, j], 2)[1:]
-                x = np.r_[0, x[0], x, penalty * ratio_max]
+                x = np.r_[0, x[0], x, penalty * perf_ratio_max]
                 raw_perf[:, i_col + j + 1] = x
                 plt.plot(x, y, label=solvers[j])
-            plt.xlim(0, 1.1 * ratio_max)
+            plt.xlim(0, 1.1 * perf_ratio_max)
             plt.ylim(0, 1)
             plt.xlabel(r'$\log_2(\mathrm{NF}/\mathrm{NF}_{\min})$')
             plt.ylabel(fr'Performance profile ($\tau=10^{{-{prec}}}$)')
@@ -419,14 +425,17 @@ class Profiles:
             ax.yaxis.set_major_locator(MultipleLocator(0.2))
             ax.yaxis.set_minor_locator(MultipleLocator(0.1))
             ax.tick_params(direction='in', which='both')
-            x = np.arange(ndata)
-            x = np.repeat(x, 2)[1:]
-            raw_data[:, i_col] = x
+            y = np.linspace(1 / len(self._prbs), 1.0, len(self._prbs))
+            y = np.repeat(y, 2)[:-1]
+            y = np.r_[0, 0, y, y[-1]]
+            i_col = (prec - 1) * (len(solvers) + 1)
+            raw_data[:, i_col] = y
             for j, solver in enumerate(solvers):
-                y = np.repeat(data[j, :], 2)[:-1]
-                raw_data[:, i_col + j + 1] = y
+                x = np.repeat(data[:, j], 2)[1:]
+                x = np.r_[0, x[0], x, penalty * data_ratio_max]
+                raw_data[:, i_col + j + 1] = x
                 plt.plot(x, y, label=solvers[j])
-            plt.xlim(0, data_xlim)
+            plt.xlim(0, 1.1 * data_ratio_max)
             plt.ylim(0, 1)
             plt.xlabel(r'Number of simplex gradients')
             plt.ylabel(fr'Data profile ($\tau=10^{{-{prec}}}$)')
@@ -455,7 +464,7 @@ class Profiles:
         print('Saving raw data profiles.')
         with open(csv_data_path, 'w') as fd:
             csv_data = csv.writer(fd)
-            header_data = np.array([[f'x{i}', *[f'y{i}_{s}' for s in solvers]]
+            header_data = np.array([[f'y{i}', *[f'x{i}_{s}' for s in solvers]]
                                     for i in range(prec_min, prec_max + 1)])
             csv_data.writerow(header_data.flatten())
             csv_data.writerows(raw_data)
@@ -575,7 +584,7 @@ class Profiles:
         self._print(problem.name, solver, obj_hist[i], mcv_hist[i], nfev)
         return merits, nfev
 
-    def _validate(self, problem, only_existing=True):
+    def _validate(self, problem):
         """
         Validate the given problem.
 
@@ -601,7 +610,8 @@ class Profiles:
         if len(txt_paths) == 0:
             valid = True
         else:
-            valid = problem.name in set(accepted)
+            # valid = problem.name in set(accepted)
+            valid = True
         if self._callback is not None:
             valid = valid and self._callback(problem)
         return valid
